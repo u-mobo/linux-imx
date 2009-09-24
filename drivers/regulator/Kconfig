@@ -243,5 +243,13 @@ config REGULATOR_DA9052
 	help
 	  Say y here to support the BUCKs and LDOs regulators found on
 	  Dialog Semiconductor DA9052 PMIC.
+
+config REGULATOR_ID95APM
+	tristate "Support regulators on IDT ID95APM PMIC"
+	depends on MFD_ID95APM
+	help
+	  This driver provides support for the voltage regulators of the
+	  IDT ID95APM PMIC.
+
 endif
 

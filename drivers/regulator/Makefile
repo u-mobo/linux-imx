@@ -44,4 +44,6 @@ obj-$(CONFIG_REGULATOR_LTC3589) += ltc3589-regulator.o
 
 obj-$(CONFIG_REGULATOR_MC9S08DZ60) += reg-mc9s08dz60.o
 
+obj-$(CONFIG_REGULATOR_ID95APM) += id95apm-regulator.o
+
 ccflags-$(CONFIG_REGULATOR_DEBUG) += -DDEBUG
