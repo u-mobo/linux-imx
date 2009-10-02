@@ -77,6 +77,13 @@ config WM8350_WATCHDOG
 	  Support for the watchdog in the WM8350 AudioPlus PMIC.  When
 	  the watchdog triggers the system will be reset.
 
+config ID95APM_WATCHDOG
+	tristate "ID95APM watchdog"
+	depends on MFD_ID95APM
+	help
+	  Support for the watchdog in the ID95APM AudioPlus PMIC.  When
+	  the watchdog triggers the system will be reset.
+
 # ALPHA Architecture
 
 # ARM Architecture
