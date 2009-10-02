@@ -509,6 +509,17 @@ config MFD_MAX17135
       This is the MAX17135 PMIC support. It includes
       core support for communication with the MAX17135 chip.
 
+config MFD_ID95APM
+        tristate "Support IDT ID95APM audio & PMIC"
+        select MFD_CORE
+        depends on I2C
+        help
+	  The IDT ID95APM is an integrated audio and power management
+	  subsystem with watchdog and RTC functionality for embedded
+	  systems.  This option enables core support for the ID95APM.
+	  Additional options must be selected to enable support for
+	  the functionality of the chip.
+
 endif # MFD_SUPPORT
 
 menu "Multimedia Capabilities Port drivers"

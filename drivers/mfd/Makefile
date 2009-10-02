@@ -80,3 +80,5 @@ da9052-objs			:= da9052-spi.o da9052-i2c.o da9052-core.o
 obj-$(CONFIG_PMIC_DA9052)	+= da9052.o
 #endif
 
+obj-$(CONFIG_MFD_ID95APM)	+= id95apm.o
+
