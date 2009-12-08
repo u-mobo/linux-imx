@@ -38,3 +38,4 @@ obj-$(CONFIG_CHARGER_PCF50633)	+= pcf50633-charger.o
 obj-$(CONFIG_BATTERY_MXS)	+= mxs/
 obj-$(CONFIG_BATTERY_DS2438)	+= ds2438_battery.o
 obj-$(CONFIG_BATTERY_MAX17085)	+= max17085_battery.o
+obj-$(CONFIG_BATTERY_ID95APM)	+= id95apm_battery.o

@@ -184,4 +184,12 @@ config BATTERY_DS2438
 	select W1_SLAVE_DS2438
 	help
 	  Say Y here to enable support for batteries with ds2438 chip.
+
+config BATTERY_ID95APM
+        tristate "ID95APM PMU support"
+        depends on MFD_ID95APM
+        help
+          Say Y here to enable support for the power management unit
+	  provided by the IDT ID95APM PMIC.
+
 endif # POWER_SUPPLY
