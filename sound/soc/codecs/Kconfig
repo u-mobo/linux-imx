@@ -297,6 +297,10 @@ config SND_SOC_MXS_SPDIF
 config SND_SOC_MXC_SPDIF
 	tristate
 
+config SND_SOC_ID95APM
+	tristate
+	depends on I2C && MFD_ID95APM
+
 # Amp
 config SND_SOC_MAX9877
 	tristate

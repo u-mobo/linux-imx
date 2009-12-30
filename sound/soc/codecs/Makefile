@@ -64,6 +64,7 @@ snd-soc-bluetooth-objs := bluetooth.o
 snd-soc-mxs-spdif-objs := mxs_spdif.o
 snd-soc-mxs-adc-objs := mxs-adc-codec.o
 snd-soc-mxc-spdif-objs := mxc_spdif.o
+snd-soc-id95apm-objs := id95apm.o
 
 # Amp
 snd-soc-max9877-objs := max9877.o
@@ -137,6 +138,7 @@ obj-$(CONFIG_SND_SOC_BLUETOOTH)    += snd-soc-bluetooth.o
 obj-$(CONFIG_SND_SOC_MXS_SPDIF)	+= snd-soc-mxs-spdif.o
 obj-$(CONFIG_SND_SOC_MXS_ADC_CODEC) += snd-soc-mxs-adc.o
 obj-$(CONFIG_SND_SOC_MXC_SPDIF)	+= snd-soc-mxc-spdif.o
+obj-$(CONFIG_SND_SOC_ID95APM)	+= snd-soc-id95apm.o
 
 # Amp
 obj-$(CONFIG_SND_SOC_MAX9877)	+= snd-soc-max9877.o
