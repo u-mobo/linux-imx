@@ -43,3 +43,4 @@ obj-$(CONFIG_BACKLIGHT_MXC_PMIC) += mxc_pmic_bl.o
 obj-$(CONFIG_BACKLIGHT_WM8350) += wm8350_bl.o
 obj-$(CONFIG_BACKLIGHT_MXC_MC13892) += mxc_mc13892_bl.o
 obj-$(CONFIG_BACKLIGHT_MXS) += mxs_bl.o
+obj-$(CONFIG_BACKLIGHT_ID95APM)	+= id95apm_bl.o
