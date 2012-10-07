@@ -955,6 +955,7 @@ static struct platform_device mxc_sgtl5000_device = {
 	.name = "imx-3stack-sgtl5000",
 };
 
+#ifdef CONFIG_ANDROID_PMEM
 static struct android_pmem_platform_data android_pmem_data = {
 	.name = "pmem_adsp",
 	.size = SZ_64M,
@@ -1054,6 +1055,7 @@ static struct android_usb_platform_data android_usb_data = {
 	.num_functions = ARRAY_SIZE(usb_functions_all),
 	.functions = usb_functions_all,
 };
+#endif /* CONFIG_ANDROID_PMEM */
 
 static struct mxc_asrc_platform_data mxc_asrc_data = {
 	.channel_bits = 4,
@@ -1153,6 +1155,7 @@ static void __init smd_add_device_battery(void)
 }
 #endif
 
+#ifndef CONFIG_ANDROID_PMEM
 /*!
  * Board specific fixup function. It is called by \b setup_arch() in
  * setup.c file very early on during kernel starts. It allows the user to
@@ -1246,6 +1249,7 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
 #endif
 	}
 }
+#endif /* CONFIG_ANDROID_PMEM */
 
 static void __init mx53_smd_io_init(void)
 {
@@ -1396,12 +1400,14 @@ static void __init mxc_board_init(void)
 	mxc_register_device(&mxc_ssi1_device, NULL);
 	mxc_register_device(&mxc_ssi2_device, NULL);
 	mxc_register_device(&mxc_alsa_spdif_device, &mxc_spdif_data);
+#ifdef CONFIG_ANDROID_PMEM
 	mxc_register_device(&mxc_android_pmem_device, &android_pmem_data);
 	mxc_register_device(&mxc_android_pmem_gpu_device,
 				&android_pmem_gpu_data);
 	mxc_register_device(&usb_mass_storage_device, &mass_storage_data);
 	mxc_register_device(&usb_rndis_device, &rndis_data);
 	mxc_register_device(&android_usb_device, &android_usb_data);
+#endif /* CONFIG_ANDROID_PMEM */
 	mxc_register_device(&ahci_fsl_device, &sata_data);
 	mxc_register_device(&imx_ahci_device_hwmon, NULL);
 	/* AHCI SATA PWR EN(DCDC_5V, DCDC_3V3_BB) on SATA bus */
@@ -1461,6 +1467,7 @@ static struct sys_timer mxc_timer = {
 	.init	= mx53_smd_timer_init,
 };
 
+#ifdef CONFIG_ANDROID_PMEM
 #define TRIPLE_1080P_SIZE	(1920*ALIGN(1080, 128)*2*3)
 static void __init fixup_android_board(struct machine_desc *desc, struct tag *tags,
 				   char **cmdline, struct meminfo *mi)
@@ -1568,6 +1575,7 @@ static void __init fixup_android_board(struct machine_desc *desc, struct tag *ta
 		}
 	}
 }
+#endif /* CONFIG_ANDROID_PMEM */
 
 /*
  * The following uses standard kernel macros define in arch.h in order to

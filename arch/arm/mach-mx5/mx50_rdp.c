@@ -556,6 +556,7 @@ static struct fec_platform_data fec_data = {
 	.phy = PHY_INTERFACE_MODE_RMII,
 };
 
+#ifndef CONFIG_ANDROID_PMEM
 static u16 keymapping[] = {
 	KEY_9, KEY_0, KEY_O, KEY_P, KEY_L, KEY_DELETE, KEY_SLASH, KEY_ENTER,
 	KEY_F4, KEY_F1, KEY_F6, KEY_F9, KEY_F5, KEY_BACKSPACE, KEY_MENU, 0,
@@ -575,7 +576,7 @@ static struct keypad_data keypad_plat_data = {
 	.delay = 2,
 	.matrix = keymapping,
 };
-
+#else
 static u16 keymapping_android[] = {
 	KEY_9, KEY_0, KEY_O, KEY_P,
 	KEY_F4, KEY_F1, KEY_F6, KEY_F9,
@@ -623,6 +624,7 @@ static struct mtd_partition nand_flash_partitions[] = {
 	},
 };
 #endif
+#endif /* CONFIG_ANDROID_PMEM */
 
 /* workaround for cspi chipselect pin may not keep correct level when idle */
 static void mx50_rdp_gpio_spi_chipselect_active(int cspi_mode, int status,
@@ -1701,6 +1703,7 @@ static int __init w1_setup(char *__unused)
 
 __setup("w1", w1_setup);
 
+#ifdef CONFIG_ANDROID_PMEM
 static struct android_pmem_platform_data android_pmem_data = {
 	.name = "pmem_adsp",
 	.size = SZ_8M,
@@ -1771,6 +1774,7 @@ static struct android_usb_platform_data android_usb_data = {
 	.num_functions = ARRAY_SIZE(usb_functions_all),
 	.functions = usb_functions_all,
 };
+#endif /* CONFIG_ANDROID_PMEM */
 
 static int __initdata enable_keypad = {0};
 static int __init keypad_setup(char *__unused)
@@ -1811,8 +1815,13 @@ static struct gpmi_nfc_platform_data  gpmi_nfc_platform_data = {
 	.max_chip_count          = 2,
 	.boot_area_size_in_bytes = 20 * SZ_1M,
 	.partition_source_types  = gpmi_nfc_partition_source_types,
+#ifdef CONFIG_ANDROID_PMEM
 	.partitions              = nand_flash_partitions,
 	.partition_count         = ARRAY_SIZE(nand_flash_partitions),
+#else
+	.partitions              = 0,
+	.partition_count         = 0,
+#endif /* CONFIG_ANDROID_PMEM */
 };
 
 static void fec_gpio_iomux_init()
@@ -1926,6 +1935,7 @@ static struct mxc_pm_platform_data mx50_pm_data = {
 	.suspend_exit = mx50_suspend_exit,
 };
 
+#ifndef CONFIG_ANDROID_PMEM
 /*!
  * Board specific fixup function. It is called by \b setup_arch() in
  * setup.c file very early on during kernel starts. It allows the user to
@@ -1947,6 +1957,7 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
 	get_dvfs_core_wp = mx50_rdp_get_dvfs_core_table;
 	num_cpu_wp = ARRAY_SIZE(cpu_wp_auto);
 }
+#endif /* CONFIG_ANDROID_PMEM */
 
 static void __init mx50_rdp_io_init(void)
 {
@@ -2082,7 +2093,11 @@ static void __init mxc_board_init(void)
 	mxc_register_device(&mxc_pxp_v4l2, NULL);
 	mxc_register_device(&pm_device, &mx50_pm_data);
 	if (enable_keypad)
+#ifdef CONFIG_ANDROID_PMEM
 		mxc_register_device(&mxc_keypad_device, &keypad_android_plat_data);
+#else
+		mxc_register_device(&mxc_keypad_device, &keypad_plat_data);
+#endif /* CONFIG_ANDROID_PMEM */
 
 	mxc_register_device(&mxcsdhc1_device, &mmc1_data);
 	if (board_is_mx50_rd3())
@@ -2103,12 +2118,14 @@ static void __init mxc_board_init(void)
 	i2c_register_board_info(1, mxc_i2c1_board_info,
 				ARRAY_SIZE(mxc_i2c1_board_info));
 
+#ifdef CONFIG_ANDROID_PMEM
 	mxc_register_device(&mxc_android_pmem_device, &android_pmem_data);
 	mxc_register_device(&mxc_android_pmem_gpu_device,
 					&android_pmem_gpu_data);
 	mxc_register_device(&usb_mass_storage_device, &mass_storage_data);
 	mxc_register_device(&usb_rndis_device, &rndis_data);
 	mxc_register_device(&android_usb_device, &android_usb_data);
+#endif /* CONFIG_ANDROID_PMEM */
 	mxc_register_device(&max17135_sensor_device, NULL);
 	mxc_register_device(&epdc_device, &epdc_data);
 	if (!board_is_mx50_rd3())
@@ -2173,6 +2190,7 @@ static struct sys_timer mxc_timer = {
 	.init	= mx50_rdp_timer_init,
 };
 
+#ifdef CONFIG_ANDROID_PMEM
 static void __init fixup_android_board(struct machine_desc *desc, struct tag *tags,
 				   char **cmdline, struct meminfo *mi)
 {
@@ -2207,6 +2225,7 @@ static void __init fixup_android_board(struct machine_desc *desc, struct tag *ta
 
 	}
 }
+#endif /* CONFIG_ANDROID_PMEM */
 
 /*
  * The following uses standard kernel macros define in arch.h in order to
