@@ -30,6 +30,7 @@
 #include <linux/input.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
+#include <linux/earlysuspend.h>
 
 #define MAG3110_DRV_NAME       "mag3110"
 #define MAG3110_ID		0xC4
@@ -74,6 +75,7 @@ struct mag3110_data {
 	struct device *hwmon_dev;
 	wait_queue_head_t waitq;
 	bool data_ready;
+	bool stop_polling;
 	u8 ctl_reg1;
 };
 
@@ -186,7 +188,8 @@ static void report_abs(void)
 
 static void mag3110_dev_poll(struct input_polled_dev *dev)
 {
-	report_abs();
+	if (!mag3110_pdata->stop_polling)
+		report_abs();
 }
 
 static irqreturn_t mag3110_irq_handler(int irq, void *dev_id)
@@ -340,6 +343,7 @@ static int __devinit mag3110_probe(struct i2c_client *client,
 	init_waitqueue_head(&data->waitq);
 
 	data->hwmon_dev = hwmon_device_register(&client->dev);
+	data->stop_polling = false;
 	if (IS_ERR(data->hwmon_dev)) {
 		dev_err(&client->dev, "hwmon register failed!\n");
 		ret = PTR_ERR(data->hwmon_dev);
@@ -400,17 +404,28 @@ error_kfree:
 	return ret;
 }
 
+static int mag3110_stop_chip(struct i2c_client *client)
+{
+	u8 tmp;
+	tmp = mag3110_read_reg(client, MAG3110_CTRL_REG1);
+	return mag3110_write_reg(client,
+				 MAG3110_CTRL_REG1,
+				 tmp & ~MAG3110_AC_MASK);
+}
+
+static void mag3110_shutdown(struct i2c_client *client)
+{
+	mag3110_pdata->stop_polling = true;
+	mag3110_stop_chip(client);
+}
+
 static int __devexit mag3110_remove(struct i2c_client *client)
 {
 	struct mag3110_data *data;
 	int ret;
 
 	data = i2c_get_clientdata(client);
-
-	data->ctl_reg1 = mag3110_read_reg(client, MAG3110_CTRL_REG1);
-	ret = mag3110_write_reg(client, MAG3110_CTRL_REG1,
-				    data->ctl_reg1 & ~MAG3110_AC_MASK);
-
+	ret = mag3110_stop_chip(client);
 	free_irq(client->irq, data);
 	input_unregister_polled_device(data->poll_dev);
 	input_free_polled_device(data->poll_dev);
@@ -457,6 +472,39 @@ static int mag3110_resume(struct i2c_client *client)
 #define mag3110_resume         NULL
 #endif				/* CONFIG_PM */
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void mag3110_early_suspend(struct early_suspend *h)
+{
+	struct i2c_client *client;
+	pm_message_t state = { .event = PM_EVENT_SUSPEND };
+
+	if (!mag3110_pdata)
+		return -EINVAL;
+
+	client =  mag3110_pdata->client;
+	mag3110_suspend(client, state);
+	dev_info(&client->dev, "mag3110 early_syspend\n");
+}
+
+static void mag3110_later_resume(struct early_suspend *h)
+{
+	struct i2c_client *client;
+
+	if (!mag3110_pdata)
+		return -EINVAL;
+
+	client = mag3110_pdata->client;
+	mag3110_resume(client);
+	dev_info(&client->dev, "mag3110 late_resume\n");
+}
+
+struct early_suspend mag3110_earlysuspend = {
+      .level = EARLY_SUSPEND_LEVEL_DISABLE_FB,
+      .suspend = mag3110_early_suspend,
+      .resume = mag3110_later_resume,
+};
+#endif
+
 static const struct i2c_device_id mag3110_id[] = {
 	{MAG3110_DRV_NAME, 0},
 	{}
@@ -466,20 +514,32 @@ MODULE_DEVICE_TABLE(i2c, mag3110_id);
 static struct i2c_driver mag3110_driver = {
 	.driver = {.name = MAG3110_DRV_NAME,
 		   .owner = THIS_MODULE,},
+#ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend = mag3110_suspend,
 	.resume = mag3110_resume,
+#endif
 	.probe = mag3110_probe,
 	.remove = __devexit_p(mag3110_remove),
+	.shutdown = mag3110_shutdown,
 	.id_table = mag3110_id,
 };
 
 static int __init mag3110_init(void)
 {
-	return i2c_add_driver(&mag3110_driver);
+	int ret;
+	ret = i2c_add_driver(&mag3110_driver);
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	if (!ret)
+		register_early_suspend(&mag3110_earlysuspend);
+#endif
+	return ret;
 }
 
 static void __exit mag3110_exit(void)
 {
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	unregister_early_suspend(&mag3110_earlysuspend);
+#endif
 	i2c_del_driver(&mag3110_driver);
 }
 

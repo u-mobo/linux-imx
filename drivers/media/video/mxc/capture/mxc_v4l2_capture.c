@@ -295,6 +295,36 @@ static int mxc_v4l2_buffer_status(cam_data *cam, struct v4l2_buffer *buf)
 	return 0;
 }
 
+static int mxc_v4l2_release_bufs(cam_data *cam)
+{
+    pr_debug("In MVC:mxc_v4l2_release_bufs\n");
+    return 0;
+}
+
+static int mxc_v4l2_prepare_bufs(cam_data *cam, struct v4l2_buffer *buf)
+{
+	pr_debug("In MVC:mxc_v4l2_prepare_bufs\n");
+
+	if (buf->index < 0 || buf->index >= FRAME_NUM || buf->length <
+			PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage)) {
+		pr_err("ERROR: v4l2 capture: mxc_v4l2_prepare_bufs buffers "
+			"not allocated,index=%d, length=%d\n", buf->index,
+			buf->length);
+		return -EINVAL;
+	}
+
+	cam->frame[buf->index].buffer.index = buf->index;
+    cam->frame[buf->index].buffer.flags = V4L2_BUF_FLAG_MAPPED;
+    cam->frame[buf->index].buffer.length = buf->length;
+    cam->frame[buf->index].buffer.m.offset = cam->frame[buf->index].paddress
+		= buf->m.offset;
+    cam->frame[buf->index].buffer.type = buf->type;
+    cam->frame[buf->index].buffer.memory = V4L2_MEMORY_USERPTR;
+    cam->frame[buf->index].index = buf->index;
+
+    return 0;
+}
+
 /***************************************************************************
  * Functions for handling the video stream.
  **************************************************************************/
@@ -348,6 +378,12 @@ static int mxc_streamon(cam_data *cam)
 	if (list_empty(&cam->ready_q)) {
 		pr_err("ERROR: v4l2 capture: mxc_streamon buffer has not been "
 			"queued yet\n");
+		return -EINVAL;
+	}
+	if (cam->enc_update_eba &&
+		cam->ready_q.prev == cam->ready_q.next) {
+		pr_err("ERROR: v4l2 capture: mxc_streamon buffer need ping pong "
+			"at least two buffers\n");
 		return -EINVAL;
 	}
 
@@ -1234,6 +1270,9 @@ static int mxc_v4l2_s_param(cam_data *cam, struct v4l2_streamparm *parm)
 			currentparm.parm.capture.timeperframe.denominator,
 			parm->parm.capture.timeperframe.denominator);
 
+	if (parm->parm.capture.capturemode == currentparm.parm.capture.capturemode) {
+		return 0;
+	}
 	/* This will change any camera settings needed. */
 	ipu_csi_enable_mclk_if(CSI_MCLK_I2C, cam->csi, true, true);
 	err = vidioc_int_s_parm(cam->sensor, parm);
@@ -1795,7 +1834,6 @@ static long mxc_v4l_do_ioctl(struct file *file,
 	/* make this _really_ smp-safe */
 	if (down_interruptible(&cam->busy_lock))
 		return -EBUSY;
-
 	switch (ioctlnr) {
 	/*!
 	 * V4l2 VIDIOC_QUERYCAP ioctl
@@ -1847,8 +1885,7 @@ static long mxc_v4l_do_ioctl(struct file *file,
 			req->count = FRAME_NUM;
 		}
 
-		if ((req->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) ||
-		    (req->memory != V4L2_MEMORY_MMAP)) {
+		if ((req->type != V4L2_BUF_TYPE_VIDEO_CAPTURE)) {
 			pr_err("ERROR: v4l2 capture: VIDIOC_REQBUFS: "
 			       "wrong buffer type\n");
 			retval = -EINVAL;
@@ -1856,13 +1893,15 @@ static long mxc_v4l_do_ioctl(struct file *file,
 		}
 
 		mxc_streamoff(cam);
-		mxc_free_frame_buf(cam);
+		if (req->memory & V4L2_MEMORY_MMAP)
+			mxc_free_frame_buf(cam);
 		cam->enc_counter = 0;
 		INIT_LIST_HEAD(&cam->ready_q);
 		INIT_LIST_HEAD(&cam->working_q);
 		INIT_LIST_HEAD(&cam->done_q);
 
-		retval = mxc_allocate_frame_buf(cam, req->count);
+		if (req->memory & V4L2_MEMORY_MMAP)
+			retval = mxc_allocate_frame_buf(cam, req->count);
 		break;
 	}
 
@@ -1882,12 +1921,19 @@ static long mxc_v4l_do_ioctl(struct file *file,
 			break;
 		}
 
-		memset(buf, 0, sizeof(buf));
-		buf->index = index;
+		if (buf->memory & V4L2_MEMORY_MMAP) {
+			memset(buf, 0, sizeof(buf));
+			buf->index = index;
+		}
 
 		down(&cam->param_lock);
-		retval = mxc_v4l2_buffer_status(cam, buf);
-		up(&cam->param_lock);
+		if (buf->memory & V4L2_MEMORY_USERPTR) {
+			mxc_v4l2_release_bufs(cam);
+			retval = mxc_v4l2_prepare_bufs(cam, buf);
+		}
+		if (buf->memory & V4L2_MEMORY_MMAP)
+			retval = mxc_v4l2_buffer_status(cam, buf);
+			up(&cam->param_lock);
 		break;
 	}
 
@@ -1899,6 +1945,7 @@ static long mxc_v4l_do_ioctl(struct file *file,
 		int index = buf->index;
 		pr_debug("   case VIDIOC_QBUF\n");
 
+		up(&cam->busy_lock);
 		spin_lock_irqsave(&cam->queue_int_lock, lock_flags);
 		if ((cam->frame[index].buffer.flags & 0x7) ==
 		    V4L2_BUF_FLAG_MAPPED) {
@@ -1924,6 +1971,8 @@ static long mxc_v4l_do_ioctl(struct file *file,
 
 		buf->flags = cam->frame[index].buffer.flags;
 		spin_unlock_irqrestore(&cam->queue_int_lock, lock_flags);
+		if (down_interruptible(&cam->busy_lock))
+			return -EBUSY;
 		break;
 	}
 
@@ -1940,8 +1989,10 @@ static long mxc_v4l_do_ioctl(struct file *file,
 			break;
 		}
 
+		up(&cam->busy_lock);
 		retval = mxc_v4l_dqueue(cam, buf);
-
+		if (down_interruptible(&cam->busy_lock))
+			return -EBUSY;
 		break;
 	}
 
@@ -2544,6 +2595,14 @@ static void init_camera_struct(cam_data *cam, struct platform_device *pdev)
 	init_waitqueue_head(&cam->power_queue);
 	spin_lock_init(&cam->queue_int_lock);
 	spin_lock_init(&cam->dqueue_int_lock);
+
+	cam->dummy_frame.vaddress = dma_alloc_coherent(0,
+			       SZ_8M, &cam->dummy_frame.paddress,
+			       GFP_DMA | GFP_KERNEL);
+	if (cam->dummy_frame.vaddress == 0)
+		pr_err("ERROR: v4l2 capture: Allocate dummy frame "
+		       "failed.\n");
+	cam->dummy_frame.buffer.length = SZ_8M;
 }
 
 static ssize_t show_streaming(struct device *dev,
@@ -2632,6 +2691,13 @@ static int mxc_v4l2_probe(struct platform_device *pdev)
  */
 static int mxc_v4l2_remove(struct platform_device *pdev)
 {
+
+	if (g_cam->dummy_frame.vaddress != 0) {
+		dma_free_coherent(0, g_cam->dummy_frame.buffer.length,
+				  g_cam->dummy_frame.vaddress,
+				  g_cam->dummy_frame.paddress);
+		g_cam->dummy_frame.vaddress = 0;
+	}
 
 	if (g_cam->open_count) {
 		pr_err("ERROR: v4l2 capture:camera open "

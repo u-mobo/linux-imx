@@ -181,7 +181,7 @@ static void max17085_get_volt(struct max17085_chip *chip)
 		chip->voltage_uV = -1;
 }
 
-#define BATT_EMPTY_MV		9000
+#define BATT_EMPTY_MV		9600
 #define BATT_FULL_MV		12600
 static void max17085_get_cap(struct max17085_chip *chip)
 {
@@ -331,10 +331,6 @@ static int max17085_bat_probe(struct platform_device *pdev)
 	}
 
 	max17085_get_online(chip);
-	max17085_get_volt(chip);
-	max17085_get_health(chip);
-	max17085_get_cap(chip);
-	max17085_update_status(chip);
 
 	INIT_DELAYED_WORK_DEFERRABLE(&chip->work, max17085_work);
 	schedule_delayed_work(&chip->work, MAX17085_DELAY);
@@ -362,12 +358,21 @@ static int max17085_bat_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void max17085_bat_shutdown(struct platform_device *pdev)
+{
+       struct max17085_chip *chip = platform_get_drvdata(pdev);
+
+       cancel_delayed_work_sync(&chip->work);
+}
+
 static struct platform_driver max17085_bat_driver = {
 	.driver = {
 		   .name = "max17085_bat",
 		   },
 	.probe = max17085_bat_probe,
 	.remove = max17085_bat_remove,
+	.shutdown = max17085_bat_shutdown,
+
 };
 
 static int __devinit max17085_bat_init(void)

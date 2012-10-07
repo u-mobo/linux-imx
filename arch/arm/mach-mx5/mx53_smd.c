@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
  */
 
 /*
@@ -38,6 +38,9 @@
 #include <linux/mtd/map.h>
 #include <linux/mtd/partitions.h>
 #include <linux/regulator/consumer.h>
+#include <linux/android_pmem.h>
+#include <linux/usb/android_composite.h>
+#include <linux/usb/f_accessory.h>
 #include <linux/pmic_external.h>
 #include <linux/pmic_status.h>
 #include <linux/ipu.h>
@@ -497,7 +500,7 @@ static struct platform_pwm_backlight_data mxc_pwm_backlight_data = {
 	.pwm_id = 1,
 	.max_brightness = 255,
 	.dft_brightness = 128,
-	.pwm_period_ns = 50000,
+	.pwm_period_ns = 45454,
 };
 
 extern void mx5_ipu_reset(void);
@@ -596,9 +599,15 @@ static struct mxc_iim_data iim_data = {
 };
 
 static struct resource mxcfb_resources[] = {
-	[0] = {
-	       .flags = IORESOURCE_MEM,
-	       },
+	{
+	 .flags = IORESOURCE_MEM,
+	 },
+	{
+	 .flags = IORESOURCE_MEM,
+	 },
+	{
+	 .flags = IORESOURCE_MEM,
+	 },
 };
 
 static struct mxc_fb_platform_data fb_data[] = {
@@ -629,18 +638,20 @@ static int __init mxc_init_fb(void)
 	if (primary_di) {
 		printk(KERN_INFO "DI1 is primary\n");
 		/* DI1 -> DP-BG channel: */
-		mxc_fb_devices[1].num_resources = ARRAY_SIZE(mxcfb_resources);
-		mxc_fb_devices[1].resource = mxcfb_resources;
+		mxc_fb_devices[1].num_resources = 1;
+		mxc_fb_devices[1].resource = &mxcfb_resources[0];
 		mxc_register_device(&mxc_fb_devices[1], &fb_data[1]);
 
 		/* DI0 -> DC channel: */
+		mxc_fb_devices[0].num_resources = 1;
+		mxc_fb_devices[0].resource = &mxcfb_resources[1];
 		mxc_register_device(&mxc_fb_devices[0], &fb_data[0]);
 	} else {
 		printk(KERN_INFO "DI0 is primary\n");
 
 		/* DI0 -> DP-BG channel: */
-		mxc_fb_devices[0].num_resources = ARRAY_SIZE(mxcfb_resources);
-		mxc_fb_devices[0].resource = mxcfb_resources;
+		mxc_fb_devices[0].num_resources = 1;
+		mxc_fb_devices[0].resource = &mxcfb_resources[0];
 		mxc_register_device(&mxc_fb_devices[0], &fb_data[0]);
 
 		/* DI1 -> DC channel: */
@@ -650,6 +661,8 @@ static int __init mxc_init_fb(void)
 	/*
 	 * DI0/1 DP-FG channel:
 	 */
+	mxc_fb_devices[2].num_resources = 1;
+	mxc_fb_devices[2].resource = &mxcfb_resources[2];
 	mxc_register_device(&mxc_fb_devices[2], NULL);
 
 	return 0;
@@ -699,7 +712,7 @@ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
 };
 
 static u16 smd_touchkey_martix[4] = {
-	KEY_BACK, KEY_HOME, KEY_MENU, KEY_SEARCH,
+	KEY_BACK, KEY_HOME, KEY_MENU, KEY_POWER,
 };
 
 static struct mpr121_platform_data mpr121_keyboard_platdata = {
@@ -940,6 +953,106 @@ static int mxc_sgtl5000_init(void)
 
 static struct platform_device mxc_sgtl5000_device = {
 	.name = "imx-3stack-sgtl5000",
+};
+
+static struct android_pmem_platform_data android_pmem_data = {
+	.name = "pmem_adsp",
+	.size = SZ_64M,
+	.cached = 1,
+};
+
+static struct android_pmem_platform_data android_pmem_gpu_data = {
+	.name = "pmem_gpu",
+	.size = SZ_64M,
+	.cached = 1,
+};
+
+static char *usb_functions_ums[] = {
+	"usb_mass_storage",
+};
+
+static char *usb_functions_ums_adb[] = {
+	"usb_mass_storage",
+	"adb",
+};
+
+static char *usb_functions_rndis[] = {
+	"rndis",
+};
+
+static char *usb_functions_rndis_adb[] = {
+	"rndis",
+	"adb",
+};
+
+static char *usb_functions_accessory[] = {
+	"accessory",
+};
+
+static char *usb_functions_accessory_adb[] = {
+	"accessory",
+	"adb",
+};
+
+static char *usb_functions_all[] = {
+	"usb_mass_storage",
+	"adb",
+	"rndis",
+	"accessory",
+};
+
+static struct android_usb_product usb_products[] = {
+	{
+		.product_id	= 0x0c01,
+		.num_functions	= ARRAY_SIZE(usb_functions_ums),
+		.functions	= usb_functions_ums,
+	},
+	{
+		.product_id	= 0x0c02,
+		.num_functions	= ARRAY_SIZE(usb_functions_ums_adb),
+		.functions	= usb_functions_ums_adb,
+	},
+	{
+		.product_id	= 0x0c10,
+		.num_functions	= ARRAY_SIZE(usb_functions_rndis),
+		.functions	= usb_functions_rndis,
+	},
+	{
+		.vendor_id	= USB_ACCESSORY_VENDOR_ID,
+		.product_id	= USB_ACCESSORY_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_accessory),
+		.functions	= usb_functions_accessory,
+	},
+	{
+		.vendor_id	= USB_ACCESSORY_VENDOR_ID,
+		.product_id	= USB_ACCESSORY_ADB_PRODUCT_ID,
+		.num_functions	= ARRAY_SIZE(usb_functions_accessory_adb),
+		.functions	= usb_functions_accessory_adb,
+	},
+};
+
+static struct usb_mass_storage_platform_data mass_storage_data = {
+	.nluns		= 3,
+	.vendor		= "Freescale",
+	.product	= "MX53 SMD Android",
+	.release	= 0x0100,
+};
+
+static struct usb_ether_platform_data rndis_data = {
+	.vendorID	= 0x15a2,
+	.vendorDescr	= "Freescale",
+};
+
+static struct android_usb_platform_data android_usb_data = {
+	.vendor_id      = 0x15a2,
+	.product_id     = 0x0c01,
+	.version        = 0x0100,
+	.product_name   = "MX53 SMD Android",
+	.manufacturer_name = "Freescale",
+	.num_products = ARRAY_SIZE(usb_products),
+	.products = usb_products,
+	.num_functions = ARRAY_SIZE(usb_functions_all),
+	.functions = usb_functions_all,
 };
 
 static struct mxc_asrc_platform_data mxc_asrc_data = {
@@ -1275,12 +1388,20 @@ static void __init mxc_board_init(void)
 	mxc_register_device(&mxc_iim_device, &iim_data);
 	mxc_register_device(&mxc_pwm2_device, NULL);
 	mxc_register_device(&mxc_pwm1_backlight_device, &mxc_pwm_backlight_data);
+	/* Register mmc3(eMMC) first, make it's device number be 0 to
+	 * avoid device number change by hotplug in SD(mmc1) card */
+	mxc_register_device(&mxcsdhc3_device, &mmc3_data);
 	mxc_register_device(&mxcsdhc1_device, &mmc1_data);
 	mxc_register_device(&mxcsdhc2_device, &mmc2_data);
-	mxc_register_device(&mxcsdhc3_device, &mmc3_data);
 	mxc_register_device(&mxc_ssi1_device, NULL);
 	mxc_register_device(&mxc_ssi2_device, NULL);
 	mxc_register_device(&mxc_alsa_spdif_device, &mxc_spdif_data);
+	mxc_register_device(&mxc_android_pmem_device, &android_pmem_data);
+	mxc_register_device(&mxc_android_pmem_gpu_device,
+				&android_pmem_gpu_data);
+	mxc_register_device(&usb_mass_storage_device, &mass_storage_data);
+	mxc_register_device(&usb_rndis_device, &rndis_data);
+	mxc_register_device(&android_usb_device, &android_usb_data);
 	mxc_register_device(&ahci_fsl_device, &sata_data);
 	mxc_register_device(&imx_ahci_device_hwmon, NULL);
 	/* AHCI SATA PWR EN(DCDC_5V, DCDC_3V3_BB) on SATA bus */
@@ -1340,13 +1461,125 @@ static struct sys_timer mxc_timer = {
 	.init	= mx53_smd_timer_init,
 };
 
+#define TRIPLE_1080P_SIZE	(1920*ALIGN(1080, 128)*2*3)
+static void __init fixup_android_board(struct machine_desc *desc, struct tag *tags,
+				   char **cmdline, struct meminfo *mi)
+{
+	char *str;
+	struct tag *t, *mem_tag = 0;
+	int reserve_2ndisp = 1;
+	int total_mem = SZ_1G;
+	int left_mem = 0;
+	int gpu_mem = SZ_64M;
+	int fb0_mem = 0, fb_mem = ALIGN(TRIPLE_1080P_SIZE, SZ_1M);
+	int pmem_gpu_size = android_pmem_gpu_data.size;
+	int pmem_adsp_size = android_pmem_data.size;
+
+	mxc_set_cpu_type(MXC_CPU_MX53);
+
+	/* get fbmem= and gpu_memory= from cmdline */
+	for_each_tag(t, tags) {
+		if (t->hdr.tag == ATAG_CMDLINE) {
+			str = t->u.cmdline.cmdline;
+			str = strstr(str, "fbmem=");
+			if (str != NULL) {
+				str += 6;
+				fb0_mem = memparse(str, &str);
+			}
+
+			str = t->u.cmdline.cmdline;
+			str = strstr(str, "gpu_memory=");
+			if (str != NULL) {
+				str += 11;
+				gpu_mem = memparse(str, &str);
+			}
+
+			str = t->u.cmdline.cmdline;
+			str = strstr(str, "pmem=");
+			if (str != NULL) {
+				str += 5;
+				pmem_gpu_size = memparse(str, &str);
+				android_pmem_gpu_data.size = pmem_gpu_size;
+				if (*str == ',') {
+					str++;
+					pmem_adsp_size = memparse(str, &str);
+					android_pmem_data.size = pmem_adsp_size;
+				}
+			}
+
+			str = t->u.cmdline.cmdline;
+			if (strstr(str, "di0_primary"))
+				reserve_2ndisp = 0;
+			break;
+		}
+	}
+
+	/* get total memory from TAGS */
+	for_each_tag(t, tags) {
+		if (t->hdr.tag == ATAG_MEM)
+			if (!mem_tag ||
+				(t->u.mem.size != 0 && mem_tag &&
+				mem_tag->u.mem.start < t->u.mem.start))
+				mem_tag = t;
+	}
+
+	total_mem = mem_tag->u.mem.size;
+	left_mem = total_mem - gpu_mem
+		- fb_mem * (reserve_2ndisp ? 2 : 1) - fb0_mem
+		- pmem_gpu_size - pmem_adsp_size;
+
+	if (left_mem <= 0)
+		panic("No enough left memory for kernel!");
+
+	if (mem_tag) {
+		int start;
+
+		android_pmem_data.start = mem_tag->u.mem.start
+				+ left_mem + gpu_mem + pmem_gpu_size;
+		android_pmem_gpu_data.start = mem_tag->u.mem.start
+				+ left_mem + gpu_mem;
+		mem_tag->u.mem.size = left_mem;
+
+		/*reserve memory for gpu*/
+		if (!gpu_data.enable_mmu) {
+			gpu_device.resource[5].start =
+				mem_tag->u.mem.start + left_mem;
+			gpu_device.resource[5].end =
+				gpu_device.resource[5].start + gpu_mem - 1;
+		}
+
+		if (reserve_2ndisp) {
+			mxcfb_resources[1].start =
+				android_pmem_data.start + android_pmem_data.size;
+			mxcfb_resources[1].end =
+				mxcfb_resources[1].start + fb_mem - 1;
+			start = mxcfb_resources[1].end + 1;
+		} else {
+			start = android_pmem_data.start + android_pmem_data.size;
+		}
+
+		mxcfb_resources[2].start = start;
+		mxcfb_resources[2].end = start + fb_mem - 1;
+		if (fb0_mem) {
+			mxcfb_resources[0].start =
+				mxcfb_resources[2].end + 1;
+			mxcfb_resources[0].end =
+				mxcfb_resources[0].start + fb0_mem - 1;
+		}
+	}
+}
+
 /*
  * The following uses standard kernel macros define in arch.h in order to
  * initialize __mach_desc_MX53_SMD data structure.
  */
 MACHINE_START(MX53_SMD, "Freescale MX53 SMD Board")
 	/* Maintainer: Freescale Semiconductor, Inc. */
+#ifdef CONFIG_ANDROID_PMEM
+	.fixup = fixup_android_board,
+#else
 	.fixup = fixup_mxc_board,
+#endif
 	.map_io = mx5_map_io,
 	.init_irq = mx5_init_irq,
 	.init_machine = mxc_board_init,

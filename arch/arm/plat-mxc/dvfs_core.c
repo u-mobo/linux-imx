@@ -41,6 +41,7 @@
 #include <linux/input.h>
 #include <linux/platform_device.h>
 #include <linux/cpufreq.h>
+#include <linux/suspend.h>
 #include <mach/hardware.h>
 #include <mach/mxc_dvfs.h>
 
@@ -106,6 +107,7 @@ static struct delayed_work dvfs_core_handler;
  */
 static struct clk *pll1_sw_clk;
 static struct clk *cpu_clk;
+static struct clk *gpu_clk;
 static struct clk *dvfs_clk;
 static struct regulator *core_regulator;
 
@@ -489,6 +491,7 @@ static irqreturn_t dvfs_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+extern int clk_get_usecount(struct clk *clk);
 static void dvfs_core_work_handler(struct work_struct *work)
 {
 	u32 fsvai;
@@ -496,6 +499,7 @@ static void dvfs_core_work_handler(struct work_struct *work)
 	u32 curr_cpu;
 	int ret = 0;
 	int low_freq_bus_ready = 0;
+	int disable_dvfs_irq = 0;
 	int bus_incr = 0, cpu_dcr = 0;
 
 	low_freq_bus_ready = low_freq_bus_used();
@@ -510,6 +514,28 @@ static void dvfs_core_work_handler(struct work_struct *work)
 	}
 
 	curr_cpu = clk_get_rate(cpu_clk);
+
+	if (clk_get_usecount(gpu_clk)) {
+		maxf = 1;
+		if (curr_cpu != cpu_wp_tbl[0].cpu_rate) {
+			curr_wp = 0;
+			minf = 0;
+			dvfs_load_config(0);
+			if (!high_bus_freq_mode)
+				set_high_bus_freq(1);
+			set_cpu_freq(curr_wp);
+		}
+		/* If we enable DVFS's irq, the irq will keep coming,
+		 * and will consume about 3-40% cpu usage, we disable
+		 * dvfs 's irq here, and let it check the status every
+		 * 100 msecs.  If gpu clk have count to 0, it will
+		 * enable dvfs's irq let it do what it want.*/
+		schedule_delayed_work(&dvfs_core_handler, msecs_to_jiffies(100));
+		disable_dvfs_irq = 1;
+		goto END;
+	} else
+		disable_dvfs_irq = 0;
+
 	/* If FSVAI indicate freq down,
 	   check arm-clk is not in lowest frequency*/
 	if (fsvai == FSVAI_FREQ_DECREASE) {
@@ -525,7 +551,6 @@ static void dvfs_core_work_handler(struct work_struct *work)
 				curr_wp = cpu_wp_nr - 1;
 				goto END;
 			}
-
 			cpu_dcr = 1;
 			dvfs_load_config(curr_wp);
 		}
@@ -577,8 +602,10 @@ END:	/* Set MAXF, MINF */
 
 	/* Enable DVFS interrupt */
 	/* FSVAIM=0 */
-	reg = (reg & ~MXC_DVFSCNTR_FSVAIM);
-	reg |= FSVAI_FREQ_NOCHANGE;
+	if (!disable_dvfs_irq) {
+		reg = (reg & ~MXC_DVFSCNTR_FSVAIM);
+		reg |= FSVAI_FREQ_NOCHANGE;
+	}
 	/* LBFL=1 */
 	reg = (reg & ~MXC_DVFSCNTR_LBFL);
 	reg |= MXC_DVFSCNTR_LBFL;
@@ -802,6 +829,34 @@ static DEVICE_ATTR(down_threshold, 0644, downthreshold_show,
 						downthreshold_store);
 static DEVICE_ATTR(down_count, 0644, downcount_show, downcount_store);
 
+static int dvfs_notifier(struct notifier_block *nb,
+			 unsigned long event, void *dummy)
+{
+	switch (event) {
+	case PM_SUSPEND_PREPARE:
+		if (dvfs_core_is_active) {
+			dvfs_core_resume = 1;
+			printk(KERN_INFO "dvfs: disable dvfs before suspend\n");
+			stop_dvfs();
+		}
+		break;
+
+	case PM_POST_SUSPEND:
+		if (dvfs_core_resume) {
+			dvfs_core_resume = 0;
+			printk(KERN_INFO "dvfs: enable dvfs after resume\n");
+			start_dvfs();
+		}
+		break;
+	}
+
+	return 0;
+}
+
+static struct notifier_block dvfs_notifier_block = {
+	.notifier_call = dvfs_notifier,
+};
+
 /*!
  * This is the probe routine for the DVFS driver.
  *
@@ -830,6 +885,12 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
 	if (IS_ERR(cpu_clk)) {
 		printk(KERN_ERR "%s: failed to get cpu clock\n", __func__);
 		return PTR_ERR(cpu_clk);
+	}
+
+	gpu_clk = clk_get(NULL, "gpu3d_clk");
+	if (IS_ERR(cpu_clk)) {
+		printk(KERN_ERR "%s: failed to get gpu clock\n", __func__);
+		return PTR_ERR(gpu_clk);
 	}
 
 	dvfs_clk = clk_get(NULL, dvfs_data->clk2_id);
@@ -921,6 +982,8 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
 	dvfs_core_resume = 0;
 	cpufreq_trig_needed = 0;
 
+	register_pm_notifier(&dvfs_notifier_block);
+
 	return err;
 err3:
 	free_irq(dvfs_data->irq, dvfs_dev);
@@ -981,8 +1044,6 @@ static struct platform_driver mxc_dvfs_core_driver = {
 		   .shutdown = mxc_dvfscore_shutdown,
 		   },
 	.probe = mxc_dvfs_core_probe,
-	.suspend = mxc_dvfs_core_suspend,
-	.resume = mxc_dvfs_core_resume,
 };
 
 static int __init dvfs_init(void)
