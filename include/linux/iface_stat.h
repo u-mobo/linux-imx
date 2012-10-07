@@ -39,10 +39,10 @@ void iface_stat_update(struct net_device *dev);
 
 #else
 
-static inline void create_iface_stat(in_dev)
+static inline void create_iface_stat(const struct in_device *in_dev)
 { }
 
-static inline void iface_stat_update(dev)
+static inline void iface_stat_update(struct net_device *dev)
 { }
 
 #endif
