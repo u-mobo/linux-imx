@@ -578,7 +578,9 @@ bail:
 static void ocfs2_dio_end_io(struct kiocb *iocb,
 			     loff_t offset,
 			     ssize_t bytes,
-			     void *private)
+			     void *private,
+			     int ret,
+			     bool is_async)
 {
 	struct inode *inode = iocb->ki_filp->f_path.dentry->d_inode;
 	int level;
@@ -592,6 +594,9 @@ static void ocfs2_dio_end_io(struct kiocb *iocb,
 	if (!level)
 		up_read(&inode->i_alloc_sem);
 	ocfs2_rw_unlock(inode, level);
+
+	if (is_async)
+		aio_complete(iocb, ret, 0);
 }
 
 /*
@@ -1033,6 +1038,12 @@ static int ocfs2_prepare_page_for_write(struct inode *inode, u64 *p_blkno,
 
 	ocfs2_figure_cluster_boundaries(OCFS2_SB(inode->i_sb), cpos,
 					&cluster_start, &cluster_end);
+
+	/* treat the write as new if the a hole/lseek spanned across
+	 * the page boundary.
+	 */
+	new = new | ((i_size_read(inode) <= page_offset(page)) &&
+			(page_offset(page) <= user_pos));
 
 	if (page == wc->w_target_page) {
 		map_from = user_pos & (PAGE_CACHE_SIZE - 1);

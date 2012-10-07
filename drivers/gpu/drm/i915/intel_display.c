@@ -1502,6 +1502,7 @@ static void ironlake_enable_pll_edp (struct drm_crtc *crtc)
 	dpa_ctl = I915_READ(DP_A);
 	dpa_ctl |= DP_PLL_ENABLE;
 	I915_WRITE(DP_A, dpa_ctl);
+	POSTING_READ(DP_A);
 	udelay(200);
 }
 
@@ -2313,6 +2314,9 @@ static void intel_crtc_dpms(struct drm_crtc *crtc, int mode)
 	int pipe = intel_crtc->pipe;
 	bool enabled;
 
+	if (intel_crtc->dpms_mode == mode)
+		return;
+
 	dev_priv->display.dpms(crtc, mode);
 
 	intel_crtc->dpms_mode = mode;
@@ -2372,11 +2376,19 @@ static bool intel_crtc_mode_fixup(struct drm_crtc *crtc,
 				  struct drm_display_mode *adjusted_mode)
 {
 	struct drm_device *dev = crtc->dev;
+
 	if (HAS_PCH_SPLIT(dev)) {
 		/* FDI link clock is fixed at 2.7G */
 		if (mode->clock * 3 > 27000 * 4)
 			return MODE_CLOCK_HIGH;
 	}
+
+	/* XXX some encoders set the crtcinfo, others don't.
+	 * Obviously we need some form of conflict resolution here...
+	 */
+	if (adjusted_mode->crtc_htotal == 0)
+		drm_mode_set_crtcinfo(adjusted_mode, 0);
+
 	return true;
 }
 
@@ -3202,8 +3214,7 @@ static void ironlake_update_wm(struct drm_device *dev,  int planea_clock,
 		reg_value = I915_READ(WM1_LP_ILK);
 		reg_value &= ~(WM1_LP_LATENCY_MASK | WM1_LP_SR_MASK |
 			       WM1_LP_CURSOR_MASK);
-		reg_value |= WM1_LP_SR_EN |
-			     (ilk_sr_latency << WM1_LP_LATENCY_SHIFT) |
+		reg_value |= (ilk_sr_latency << WM1_LP_LATENCY_SHIFT) |
 			     (sr_wm << WM1_LP_SR_SHIFT) | cursor_wm;
 
 		I915_WRITE(WM1_LP_ILK, reg_value);
@@ -4816,14 +4827,16 @@ static int intel_crtc_page_flip(struct drm_crtc *crtc,
 	work->pending_flip_obj = obj;
 
 	if (intel_crtc->plane)
-		flip_mask = I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT;
+		flip_mask = MI_WAIT_FOR_PLANE_B_FLIP;
 	else
-		flip_mask = I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT;
+		flip_mask = MI_WAIT_FOR_PLANE_A_FLIP;
 
-	/* Wait for any previous flip to finish */
-	if (IS_GEN3(dev))
-		while (I915_READ(ISR) & flip_mask)
-			;
+	if (IS_GEN3(dev) || IS_GEN2(dev)) {
+		BEGIN_LP_RING(2);
+		OUT_RING(MI_WAIT_FOR_EVENT | flip_mask);
+		OUT_RING(0);
+		ADVANCE_LP_RING();
+	}
 
 	/* Offset into the new buffer for cases of shared fbs between CRTCs */
 	offset = obj_priv->gtt_offset;
@@ -4837,8 +4850,14 @@ static int intel_crtc_page_flip(struct drm_crtc *crtc,
 		OUT_RING(offset | obj_priv->tiling_mode);
 		pipesrc = I915_READ(pipesrc_reg); 
 		OUT_RING(pipesrc & 0x0fff0fff);
-	} else {
+	} else if (IS_GEN3(dev)) {
 		OUT_RING(MI_DISPLAY_FLIP_I915 |
+			 MI_DISPLAY_FLIP_PLANE(intel_crtc->plane));
+		OUT_RING(fb->pitch);
+		OUT_RING(offset);
+		OUT_RING(MI_NOOP);
+	} else {
+		OUT_RING(MI_DISPLAY_FLIP |
 			 MI_DISPLAY_FLIP_PLANE(intel_crtc->plane));
 		OUT_RING(fb->pitch);
 		OUT_RING(offset);
@@ -4906,7 +4925,7 @@ static void intel_crtc_init(struct drm_device *dev, int pipe)
 	dev_priv->pipe_to_crtc_mapping[intel_crtc->pipe] = &intel_crtc->base;
 
 	intel_crtc->cursor_addr = 0;
-	intel_crtc->dpms_mode = DRM_MODE_DPMS_OFF;
+	intel_crtc->dpms_mode = -1;
 	drm_crtc_helper_add(&intel_crtc->base, &intel_helper_funcs);
 
 	intel_crtc->busy = false;
@@ -5397,6 +5416,13 @@ void intel_init_clock_gating(struct drm_device *dev)
 		I915_WRITE(PCH_DSPCLK_GATE_D, dspclk_gate);
 
 		/*
+		 * On Ibex Peak and Cougar Point, we need to disable clock
+		 * gating for the panel power sequencer or it will fail to
+		 * start up when no ports are active.
+		 */
+		I915_WRITE(SOUTH_DSPCLK_GATE_D, PCH_DPLSUNIT_CLOCK_GATE_DISABLE);
+
+		/*
 		 * According to the spec the following bits should be set in
 		 * order to enable memory self-refresh
 		 * The bit 22/21 of 0x42004
@@ -5413,6 +5439,9 @@ void intel_init_clock_gating(struct drm_device *dev)
 			I915_WRITE(DISP_ARB_CTL,
 					(I915_READ(DISP_ARB_CTL) |
 						DISP_FBC_WM_DIS));
+		I915_WRITE(WM3_LP_ILK, 0);
+		I915_WRITE(WM2_LP_ILK, 0);
+		I915_WRITE(WM1_LP_ILK, 0);
 		}
 		return;
 	} else if (IS_G4X(dev)) {

@@ -229,7 +229,6 @@ intel_dp_aux_ch(struct intel_encoder *intel_encoder,
 	uint32_t ch_data = ch_ctl + 4;
 	int i;
 	int recv_bytes;
-	uint32_t ctl;
 	uint32_t status;
 	uint32_t aux_clock_divider;
 	int try, precharge;
@@ -253,41 +252,43 @@ intel_dp_aux_ch(struct intel_encoder *intel_encoder,
 	else
 		precharge = 5;
 
+	if (I915_READ(ch_ctl) & DP_AUX_CH_CTL_SEND_BUSY) {
+		DRM_ERROR("dp_aux_ch not started status 0x%08x\n",
+			  I915_READ(ch_ctl));
+		return -EBUSY;
+	}
+
 	/* Must try at least 3 times according to DP spec */
 	for (try = 0; try < 5; try++) {
 		/* Load the send data into the aux channel data registers */
-		for (i = 0; i < send_bytes; i += 4) {
-			uint32_t    d = pack_aux(send + i, send_bytes - i);
-	
-			I915_WRITE(ch_data + i, d);
-		}
-	
-		ctl = (DP_AUX_CH_CTL_SEND_BUSY |
-		       DP_AUX_CH_CTL_TIME_OUT_400us |
-		       (send_bytes << DP_AUX_CH_CTL_MESSAGE_SIZE_SHIFT) |
-		       (precharge << DP_AUX_CH_CTL_PRECHARGE_2US_SHIFT) |
-		       (aux_clock_divider << DP_AUX_CH_CTL_BIT_CLOCK_2X_SHIFT) |
-		       DP_AUX_CH_CTL_DONE |
-		       DP_AUX_CH_CTL_TIME_OUT_ERROR |
-		       DP_AUX_CH_CTL_RECEIVE_ERROR);
+		for (i = 0; i < send_bytes; i += 4)
+			I915_WRITE(ch_data + i,
+				   pack_aux(send + i, send_bytes - i));
 	
 		/* Send the command and wait for it to complete */
-		I915_WRITE(ch_ctl, ctl);
-		(void) I915_READ(ch_ctl);
+		I915_WRITE(ch_ctl,
+			   DP_AUX_CH_CTL_SEND_BUSY |
+			   DP_AUX_CH_CTL_TIME_OUT_400us |
+			   (send_bytes << DP_AUX_CH_CTL_MESSAGE_SIZE_SHIFT) |
+			   (precharge << DP_AUX_CH_CTL_PRECHARGE_2US_SHIFT) |
+			   (aux_clock_divider << DP_AUX_CH_CTL_BIT_CLOCK_2X_SHIFT) |
+			   DP_AUX_CH_CTL_DONE |
+			   DP_AUX_CH_CTL_TIME_OUT_ERROR |
+			   DP_AUX_CH_CTL_RECEIVE_ERROR);
 		for (;;) {
-			udelay(100);
 			status = I915_READ(ch_ctl);
 			if ((status & DP_AUX_CH_CTL_SEND_BUSY) == 0)
 				break;
+			udelay(100);
 		}
 	
 		/* Clear done status and any errors */
-		I915_WRITE(ch_ctl, (status |
-				DP_AUX_CH_CTL_DONE |
-				DP_AUX_CH_CTL_TIME_OUT_ERROR |
-				DP_AUX_CH_CTL_RECEIVE_ERROR));
-		(void) I915_READ(ch_ctl);
-		if ((status & DP_AUX_CH_CTL_TIME_OUT_ERROR) == 0)
+		I915_WRITE(ch_ctl,
+			   status |
+			   DP_AUX_CH_CTL_DONE |
+			   DP_AUX_CH_CTL_TIME_OUT_ERROR |
+			   DP_AUX_CH_CTL_RECEIVE_ERROR);
+		if (status & DP_AUX_CH_CTL_DONE)
 			break;
 	}
 
@@ -314,15 +315,12 @@ intel_dp_aux_ch(struct intel_encoder *intel_encoder,
 	/* Unload any bytes sent back from the other side */
 	recv_bytes = ((status & DP_AUX_CH_CTL_MESSAGE_SIZE_MASK) >>
 		      DP_AUX_CH_CTL_MESSAGE_SIZE_SHIFT);
-
 	if (recv_bytes > recv_size)
 		recv_bytes = recv_size;
 	
-	for (i = 0; i < recv_bytes; i += 4) {
-		uint32_t    d = I915_READ(ch_data + i);
-
-		unpack_aux(d, recv + i, recv_bytes - i);
-	}
+	for (i = 0; i < recv_bytes; i += 4)
+		unpack_aux(I915_READ(ch_data + i),
+			   recv + i, recv_bytes - i);
 
 	return recv_bytes;
 }
@@ -418,6 +416,7 @@ intel_dp_i2c_aux_ch(struct i2c_adapter *adapter, int mode,
 	uint16_t address = algo_data->address;
 	uint8_t msg[5];
 	uint8_t reply[2];
+	unsigned retry;
 	int msg_bytes;
 	int reply_bytes;
 	int ret;
@@ -452,14 +451,33 @@ intel_dp_i2c_aux_ch(struct i2c_adapter *adapter, int mode,
 		break;
 	}
 
-	for (;;) {
-	  ret = intel_dp_aux_ch(intel_encoder,
-				msg, msg_bytes,
-				reply, reply_bytes);
+	for (retry = 0; retry < 5; retry++) {
+		ret = intel_dp_aux_ch(intel_encoder,
+				      msg, msg_bytes,
+				      reply, reply_bytes);
 		if (ret < 0) {
 			DRM_DEBUG_KMS("aux_ch failed %d\n", ret);
 			return ret;
 		}
+
+		switch (reply[0] & AUX_NATIVE_REPLY_MASK) {
+		case AUX_NATIVE_REPLY_ACK:
+			/* I2C-over-AUX Reply field is only valid
+			 * when paired with AUX ACK.
+			 */
+			break;
+		case AUX_NATIVE_REPLY_NACK:
+			DRM_DEBUG_KMS("aux_ch native nack\n");
+			return -EREMOTEIO;
+		case AUX_NATIVE_REPLY_DEFER:
+			udelay(100);
+			continue;
+		default:
+			DRM_ERROR("aux_ch invalid native reply 0x%02x\n",
+				  reply[0]);
+			return -EREMOTEIO;
+		}
+
 		switch (reply[0] & AUX_I2C_REPLY_MASK) {
 		case AUX_I2C_REPLY_ACK:
 			if (mode == MODE_I2C_READ) {
@@ -467,17 +485,20 @@ intel_dp_i2c_aux_ch(struct i2c_adapter *adapter, int mode,
 			}
 			return reply_bytes - 1;
 		case AUX_I2C_REPLY_NACK:
-			DRM_DEBUG_KMS("aux_ch nack\n");
+			DRM_DEBUG_KMS("aux_i2c nack\n");
 			return -EREMOTEIO;
 		case AUX_I2C_REPLY_DEFER:
-			DRM_DEBUG_KMS("aux_ch defer\n");
+			DRM_DEBUG_KMS("aux_i2c defer\n");
 			udelay(100);
 			break;
 		default:
-			DRM_ERROR("aux_ch invalid reply 0x%02x\n", reply[0]);
+			DRM_ERROR("aux_i2c invalid reply 0x%02x\n", reply[0]);
 			return -EREMOTEIO;
 		}
 	}
+
+	DRM_ERROR("too many retries, giving up\n");
+	return -EREMOTEIO;
 }
 
 static int

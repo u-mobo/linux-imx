@@ -658,6 +658,43 @@ static int evergreen_cp_load_microcode(struct radeon_device *rdev)
 	return 0;
 }
 
+static int evergreen_cp_start(struct radeon_device *rdev)
+{
+	int r;
+	uint32_t cp_me;
+
+	r = radeon_ring_lock(rdev, 7);
+	if (r) {
+		DRM_ERROR("radeon: cp failed to lock ring (%d).\n", r);
+		return r;
+	}
+	radeon_ring_write(rdev, PACKET3(PACKET3_ME_INITIALIZE, 5));
+	radeon_ring_write(rdev, 0x1);
+	radeon_ring_write(rdev, 0x0);
+	radeon_ring_write(rdev, rdev->config.evergreen.max_hw_contexts - 1);
+	radeon_ring_write(rdev, PACKET3_ME_INITIALIZE_DEVICE_ID(1));
+	radeon_ring_write(rdev, 0);
+	radeon_ring_write(rdev, 0);
+	radeon_ring_unlock_commit(rdev);
+
+	cp_me = 0xff;
+	WREG32(CP_ME_CNTL, cp_me);
+
+	r = radeon_ring_lock(rdev, 4);
+	if (r) {
+		DRM_ERROR("radeon: cp failed to lock ring (%d).\n", r);
+		return r;
+	}
+	/* init some VGT regs */
+	radeon_ring_write(rdev, PACKET3(PACKET3_SET_CONTEXT_REG, 2));
+	radeon_ring_write(rdev, (VGT_VERTEX_REUSE_BLOCK_CNTL - PACKET3_SET_CONTEXT_REG_START) >> 2);
+	radeon_ring_write(rdev, 0xe);
+	radeon_ring_write(rdev, 0x10);
+	radeon_ring_unlock_commit(rdev);
+
+	return 0;
+}
+
 int evergreen_cp_resume(struct radeon_device *rdev)
 {
 	u32 tmp;
@@ -702,7 +739,7 @@ int evergreen_cp_resume(struct radeon_device *rdev)
 	rdev->cp.rptr = RREG32(CP_RB_RPTR);
 	rdev->cp.wptr = RREG32(CP_RB_WPTR);
 
-	r600_cp_start(rdev);
+	evergreen_cp_start(rdev);
 	rdev->cp.ready = true;
 	r = radeon_ring_test(rdev);
 	if (r) {
@@ -1083,7 +1120,7 @@ static void evergreen_gpu_init(struct radeon_device *rdev)
 
 		WREG32(RCU_IND_INDEX, 0x203);
 		efuse_straps_3 = RREG32(RCU_IND_DATA);
-		efuse_box_bit_127_124 = (u8)(efuse_straps_3 & 0xF0000000) >> 28;
+		efuse_box_bit_127_124 = (u8)((efuse_straps_3 & 0xF0000000) >> 28);
 
 		switch(efuse_box_bit_127_124) {
 		case 0x0:
@@ -1106,14 +1143,25 @@ static void evergreen_gpu_init(struct radeon_device *rdev)
 									EVERGREEN_MAX_BACKENDS_MASK));
 			break;
 		}
-	} else
-		gb_backend_map =
-			evergreen_get_tile_pipe_to_backend_map(rdev,
-							       rdev->config.evergreen.max_tile_pipes,
-							       rdev->config.evergreen.max_backends,
-							       ((EVERGREEN_MAX_BACKENDS_MASK <<
-								 rdev->config.evergreen.max_backends) &
-								EVERGREEN_MAX_BACKENDS_MASK));
+	} else {
+		switch (rdev->family) {
+		case CHIP_CYPRESS:
+		case CHIP_HEMLOCK:
+			gb_backend_map = 0x66442200;
+			break;
+		case CHIP_JUNIPER:
+			gb_backend_map = 0x00006420;
+			break;
+		default:
+			gb_backend_map =
+				evergreen_get_tile_pipe_to_backend_map(rdev,
+								       rdev->config.evergreen.max_tile_pipes,
+								       rdev->config.evergreen.max_backends,
+								       ((EVERGREEN_MAX_BACKENDS_MASK <<
+									 rdev->config.evergreen.max_backends) &
+									EVERGREEN_MAX_BACKENDS_MASK));
+		}
+	}
 
 	WREG32(GB_BACKEND_MAP, gb_backend_map);
 	WREG32(GB_ADDR_CONFIG, gb_addr_config);
@@ -1341,6 +1389,8 @@ int evergreen_mc_init(struct radeon_device *rdev)
 	rdev->mc.mc_vram_size = RREG32(CONFIG_MEMSIZE) * 1024 * 1024;
 	rdev->mc.real_vram_size = RREG32(CONFIG_MEMSIZE) * 1024 * 1024;
 	rdev->mc.visible_vram_size = rdev->mc.aper_size;
+	/* limit it to the aperture size for now as there is no blit support in 2.6.35/36*/
+	rdev->mc.real_vram_size = rdev->mc.visible_vram_size;
 	r600_vram_gtt_location(rdev, &rdev->mc);
 	radeon_update_bandwidth_info(rdev);
 
@@ -1356,7 +1406,6 @@ bool evergreen_gpu_is_lockup(struct radeon_device *rdev)
 static int evergreen_gpu_soft_reset(struct radeon_device *rdev)
 {
 	struct evergreen_mc_save save;
-	u32 srbm_reset = 0;
 	u32 grbm_reset = 0;
 
 	dev_info(rdev->dev, "GPU softreset \n");
@@ -1395,16 +1444,6 @@ static int evergreen_gpu_soft_reset(struct radeon_device *rdev)
 	udelay(50);
 	WREG32(GRBM_SOFT_RESET, 0);
 	(void)RREG32(GRBM_SOFT_RESET);
-
-	/* reset all the system blocks */
-	srbm_reset = SRBM_SOFT_RESET_ALL_MASK;
-
-	dev_info(rdev->dev, "  SRBM_SOFT_RESET=0x%08X\n", srbm_reset);
-	WREG32(SRBM_SOFT_RESET, srbm_reset);
-	(void)RREG32(SRBM_SOFT_RESET);
-	udelay(50);
-	WREG32(SRBM_SOFT_RESET, 0);
-	(void)RREG32(SRBM_SOFT_RESET);
 	/* Wait a little for things to settle down */
 	udelay(50);
 	dev_info(rdev->dev, "  GRBM_STATUS=0x%08X\n",
@@ -1415,10 +1454,6 @@ static int evergreen_gpu_soft_reset(struct radeon_device *rdev)
 		RREG32(GRBM_STATUS_SE1));
 	dev_info(rdev->dev, "  SRBM_STATUS=0x%08X\n",
 		RREG32(SRBM_STATUS));
-	/* After reset we need to reinit the asic as GPU often endup in an
-	 * incoherent state.
-	 */
-	atom_asic_init(rdev->mode_info.atom_context);
 	evergreen_mc_resume(rdev, &save);
 	return 0;
 }
@@ -2030,6 +2065,11 @@ int evergreen_resume(struct radeon_device *rdev)
 {
 	int r;
 
+	/* reset the asic, the gfx blocks are often in a bad state
+	 * after the driver is unloaded or after a resume
+	 */
+	if (radeon_asic_reset(rdev))
+		dev_warn(rdev->dev, "GPU reset failed !\n");
 	/* Do not reset GPU before posting, on rv770 hw unlike on r500 hw,
 	 * posting will perform necessary task to bring back GPU into good
 	 * shape.
@@ -2131,6 +2171,11 @@ int evergreen_init(struct radeon_device *rdev)
 	r = radeon_atombios_init(rdev);
 	if (r)
 		return r;
+	/* reset the asic, the gfx blocks are often in a bad state
+	 * after the driver is unloaded or after a resume
+	 */
+	if (radeon_asic_reset(rdev))
+		dev_warn(rdev->dev, "GPU reset failed !\n");
 	/* Post card if necessary */
 	if (!evergreen_card_posted(rdev)) {
 		if (!rdev->bios) {

@@ -376,10 +376,7 @@ static void iwlagn_tx_cmd_build_basic(struct iwl_priv *priv,
 		tx_flags |= TX_CMD_FLG_SEQ_CTL_MSK;
 	}
 
-	priv->cfg->ops->utils->rts_tx_cmd_flag(info, &tx_flags);
-
-	if ((tx_flags & TX_CMD_FLG_RTS_MSK) || (tx_flags & TX_CMD_FLG_CTS_MSK))
-		tx_flags |= TX_CMD_FLG_FULL_TXOP_PROT_MSK;
+	priv->cfg->ops->utils->rts_tx_cmd_flag(priv, info, fc, &tx_flags);
 
 	tx_flags &= ~(TX_CMD_FLG_ANT_SEL_MSK);
 	if (ieee80211_is_mgmt(fc)) {
@@ -452,21 +449,6 @@ static void iwlagn_tx_cmd_build_rate(struct iwl_priv *priv,
 	/* Set CCK flag as needed */
 	if ((rate_idx >= IWL_FIRST_CCK_RATE) && (rate_idx <= IWL_LAST_CCK_RATE))
 		rate_flags |= RATE_MCS_CCK_MSK;
-
-	/* Set up RTS and CTS flags for certain packets */
-	switch (fc & cpu_to_le16(IEEE80211_FCTL_STYPE)) {
-	case cpu_to_le16(IEEE80211_STYPE_AUTH):
-	case cpu_to_le16(IEEE80211_STYPE_DEAUTH):
-	case cpu_to_le16(IEEE80211_STYPE_ASSOC_REQ):
-	case cpu_to_le16(IEEE80211_STYPE_REASSOC_REQ):
-		if (tx_cmd->tx_flags & TX_CMD_FLG_RTS_MSK) {
-			tx_cmd->tx_flags &= ~TX_CMD_FLG_RTS_MSK;
-			tx_cmd->tx_flags |= TX_CMD_FLG_CTS_MSK;
-		}
-		break;
-	default:
-		break;
-	}
 
 	/* Set up antennas */
 	priv->mgmt_tx_ant = iwl_toggle_tx_ant(priv, priv->mgmt_tx_ant);
@@ -1159,11 +1141,14 @@ int iwlagn_tx_queue_reclaim(struct iwl_priv *priv, int txq_id, int index)
 	     q->read_ptr = iwl_queue_inc_wrap(q->read_ptr, q->n_bd)) {
 
 		tx_info = &txq->txb[txq->q.read_ptr];
-		iwlagn_tx_status(priv, tx_info->skb[0]);
+
+		if (WARN_ON_ONCE(tx_info->skb[0] == NULL))
+			continue;
 
 		hdr = (struct ieee80211_hdr *)tx_info->skb[0]->data;
-		if (hdr && ieee80211_is_data_qos(hdr->frame_control))
+		if (ieee80211_is_data_qos(hdr->frame_control))
 			nfreed++;
+		iwlagn_tx_status(priv, tx_info->skb[0]);
 		tx_info->skb[0] = NULL;
 
 		if (priv->cfg->ops->lib->txq_inval_byte_cnt_tbl)

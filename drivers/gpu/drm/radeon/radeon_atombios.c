@@ -84,6 +84,14 @@ static inline struct radeon_i2c_bus_rec radeon_lookup_i2c_gpio(struct radeon_dev
 		for (i = 0; i < num_indices; i++) {
 			gpio = &i2c_info->asGPIO_Info[i];
 
+			/* some DCE3 boards have bad data for this entry */
+			if (ASIC_IS_DCE3(rdev)) {
+				if ((i == 4) &&
+				    (gpio->usClkMaskRegisterIndex == 0x1fda) &&
+				    (gpio->sucI2cId.ucAccess == 0x94))
+					gpio->sucI2cId.ucAccess = 0x14;
+			}
+
 			if (gpio->sucI2cId.ucAccess == id) {
 				i2c.mask_clk_reg = le16_to_cpu(gpio->usClkMaskRegisterIndex) * 4;
 				i2c.mask_data_reg = le16_to_cpu(gpio->usDataMaskRegisterIndex) * 4;
@@ -206,6 +214,7 @@ static bool radeon_atom_apply_quirks(struct drm_device *dev,
 				     uint16_t *line_mux,
 				     struct radeon_hpd *hpd)
 {
+	struct radeon_device *rdev = dev->dev_private;
 
 	/* Asus M2A-VM HDMI board lists the DVI port as HDMI */
 	if ((dev->pdev->device == 0x791e) &&
@@ -223,6 +232,15 @@ static bool radeon_atom_apply_quirks(struct drm_device *dev,
 		if ((*connector_type == DRM_MODE_CONNECTOR_HDMIA) &&
 		    (supported_device == ATOM_DEVICE_DFP3_SUPPORT))
 			*connector_type = DRM_MODE_CONNECTOR_DVID;
+	}
+
+	/* MSI K9A2GM V2/V3 board has no HDMI or DVI */
+	if ((dev->pdev->device == 0x796e) &&
+	    (dev->pdev->subsystem_vendor == 0x1462) &&
+	    (dev->pdev->subsystem_device == 0x7302)) {
+		if ((supported_device == ATOM_DEVICE_DFP2_SUPPORT) ||
+		    (supported_device == ATOM_DEVICE_DFP3_SUPPORT))
+			return false;
 	}
 
 	/* a-bit f-i90hd - ciaranm on #radeonhd - this board has no DVI */
@@ -271,6 +289,13 @@ static bool radeon_atom_apply_quirks(struct drm_device *dev,
 			*line_mux = 0x90;
 	}
 
+	/* mac rv630, rv730, others */
+	if ((supported_device == ATOM_DEVICE_TV1_SUPPORT) &&
+	    (*connector_type == DRM_MODE_CONNECTOR_DVII)) {
+		*connector_type = DRM_MODE_CONNECTOR_9PinDIN;
+		*line_mux = CONNECTOR_7PIN_DIN_ENUM_ID1;
+	}
+
 	/* ASUS HD 3600 XT board lists the DVI port as HDMI */
 	if ((dev->pdev->device == 0x9598) &&
 	    (dev->pdev->subsystem_vendor == 0x1043) &&
@@ -308,13 +333,22 @@ static bool radeon_atom_apply_quirks(struct drm_device *dev,
 		}
 	}
 
-	/* Acer laptop reports DVI-D as DVI-I */
+	/* Acer laptop reports DVI-D as DVI-I and hpd pins reversed */
 	if ((dev->pdev->device == 0x95c4) &&
 	    (dev->pdev->subsystem_vendor == 0x1025) &&
 	    (dev->pdev->subsystem_device == 0x013c)) {
+		struct radeon_gpio_rec gpio;
+
 		if ((*connector_type == DRM_MODE_CONNECTOR_DVII) &&
-		    (supported_device == ATOM_DEVICE_DFP1_SUPPORT))
+		    (supported_device == ATOM_DEVICE_DFP1_SUPPORT)) {
+			gpio = radeon_lookup_gpio(rdev, 6);
+			*hpd = radeon_atom_get_hpd_info_from_gpio(rdev, &gpio);
 			*connector_type = DRM_MODE_CONNECTOR_DVID;
+		} else if ((*connector_type == DRM_MODE_CONNECTOR_HDMIA) &&
+			   (supported_device == ATOM_DEVICE_DFP1_SUPPORT)) {
+			gpio = radeon_lookup_gpio(rdev, 7);
+			*hpd = radeon_atom_get_hpd_info_from_gpio(rdev, &gpio);
+		}
 	}
 
 	/* XFX Pine Group device rv730 reports no VGA DDC lines
@@ -1049,7 +1083,7 @@ bool radeon_atombios_sideport_present(struct radeon_device *rdev)
 			}
 			break;
 		case 2:
-			if (igp_info->info_2.ucMemoryType & 0x0f)
+			if (igp_info->info_2.ulBootUpSidePortClock)
 				return true;
 			break;
 		default:
@@ -2091,7 +2125,7 @@ void radeon_atom_initialize_bios_scratch_regs(struct drm_device *dev)
 	bios_2_scratch &= ~ATOM_S2_VRI_BRIGHT_ENABLE;
 
 	/* tell the bios not to handle mode switching */
-	bios_6_scratch |= (ATOM_S6_ACC_BLOCK_DISPLAY_SWITCH | ATOM_S6_ACC_MODE);
+	bios_6_scratch |= ATOM_S6_ACC_BLOCK_DISPLAY_SWITCH;
 
 	if (rdev->family >= CHIP_R600) {
 		WREG32(R600_BIOS_2_SCRATCH, bios_2_scratch);
@@ -2142,10 +2176,13 @@ void radeon_atom_output_lock(struct drm_encoder *encoder, bool lock)
 	else
 		bios_6_scratch = RREG32(RADEON_BIOS_6_SCRATCH);
 
-	if (lock)
+	if (lock) {
 		bios_6_scratch |= ATOM_S6_CRITICAL_STATE;
-	else
+		bios_6_scratch &= ~ATOM_S6_ACC_MODE;
+	} else {
 		bios_6_scratch &= ~ATOM_S6_CRITICAL_STATE;
+		bios_6_scratch |= ATOM_S6_ACC_MODE;
+	}
 
 	if (rdev->family >= CHIP_R600)
 		WREG32(R600_BIOS_6_SCRATCH, bios_6_scratch);

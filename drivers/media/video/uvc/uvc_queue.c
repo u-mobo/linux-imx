@@ -202,6 +202,8 @@ int uvc_free_buffers(struct uvc_video_queue *queue)
 	}
 
 	if (queue->count) {
+		uvc_queue_cancel(queue, 0);
+		INIT_LIST_HEAD(&queue->mainqueue);
 #ifndef CONFIG_USB_VIDEO_BUFFERS_DMA
 		vfree(queue->mem);
 #else

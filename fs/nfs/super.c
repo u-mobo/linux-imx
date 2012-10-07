@@ -431,7 +431,15 @@ static int nfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 		goto out_err;
 
 	error = server->nfs_client->rpc_ops->statfs(server, fh, &res);
+	if (unlikely(error == -ESTALE)) {
+		struct dentry *pd_dentry;
 
+		pd_dentry = dget_parent(dentry);
+		if (pd_dentry != NULL) {
+			nfs_zap_caches(pd_dentry->d_inode);
+			dput(pd_dentry);
+		}
+	}
 	nfs_free_fattr(res.fattr);
 	if (error < 0)
 		goto out_err;
@@ -652,6 +660,13 @@ static void nfs_show_mount_options(struct seq_file *m, struct nfs_server *nfss,
 
 	if (nfss->options & NFS_OPTION_FSCACHE)
 		seq_printf(m, ",fsc");
+
+	if (nfss->flags & NFS_MOUNT_LOOKUP_CACHE_NONEG) {
+		if (nfss->flags & NFS_MOUNT_LOOKUP_CACHE_NONE)
+			seq_printf(m, ",lookupcache=none");
+		else
+			seq_printf(m, ",lookupcache=pos");
+	}
 }
 
 /*
@@ -1985,6 +2000,15 @@ nfs_remount(struct super_block *sb, int *flags, char *raw_data)
 	error = nfs_parse_mount_options((char *)options, data);
 	if (error < 0)
 		goto out;
+
+	/*
+	 * noac is a special case. It implies -o sync, but that's not
+	 * necessarily reflected in the mtab options. do_remount_sb
+	 * will clear MS_SYNCHRONOUS if -o sync wasn't specified in the
+	 * remount options, so we have to explicitly reset it.
+	 */
+	if (data->flags & NFS_MOUNT_NOAC)
+		*flags |= MS_SYNCHRONOUS;
 
 	/* compare new mount options with old ones */
 	error = nfs_compare_remount_data(nfss, data);
