@@ -18,7 +18,7 @@ config USB_VIDEO_CLASS_INPUT_EVDEV
 
 config USB_VIDEO_BUFFERS_DMA
        bool "UVC frame buffers allocated by DMA"
-       default y
+       default n
        depends on USB_VIDEO_CLASS
        ---help---
          This option makes frame buffers of USB Video Class devices are

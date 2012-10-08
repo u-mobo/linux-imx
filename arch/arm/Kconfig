@@ -349,6 +349,7 @@ config ARCH_MXC
 	select GENERIC_CLOCKEVENTS
 	select ARCH_REQUIRE_GPIOLIB
 	select COMMON_CLKDEV
+	select ZONE_DMA if !ANDROID
 	select ARCH_HAS_CPUFREQ
 	help
 	  Support for Freescale MXC/iMX-based family of processors
