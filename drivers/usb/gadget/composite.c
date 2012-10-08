@@ -116,6 +116,7 @@ void usb_composite_force_reset(struct usb_composite_dev *cdev)
 	/* force reenumeration */
 	if (cdev && cdev->gadget &&
 			cdev->gadget->speed != USB_SPEED_UNKNOWN) {
+#ifdef CONFIG_SWITCH
 		/*
 		* Another USB disconnect event is reported from
 		* controller before "disconnected" switch event is sent out.
@@ -128,6 +129,7 @@ void usb_composite_force_reset(struct usb_composite_dev *cdev)
 		* "disconnect" event will be reported
 		*/
 		cdev->mute_switch = 2;
+#endif
 
 		/* avoid sending a disconnect switch event until after we disconnect */
 		spin_unlock_irqrestore(&cdev->lock, flags);
@@ -579,7 +581,9 @@ static int set_config(struct usb_composite_dev *cdev,
 done:
 	usb_gadget_vbus_draw(gadget, power);
 
+#ifdef CONFIG_SWITCH
 	schedule_work(&cdev->switch_work);
+#endif
 	return result;
 }
 
@@ -833,6 +837,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	u16				w_length = le16_to_cpu(ctrl->wLength);
 	struct usb_function		*f = NULL;
 	u8				endp;
+#ifdef CONFIG_SWITCH
 	unsigned int flags;
 
 	spin_lock_irqsave(&cdev->lock, flags);
@@ -841,6 +846,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		schedule_work(&cdev->switch_work);
 	}
 	spin_unlock_irqrestore(&cdev->lock, flags);
+#endif
 
 	/* partial re-init of the response message; the function or the
 	 * gadget might need to intercept e.g. a control-OUT completion
@@ -1055,11 +1061,13 @@ static void composite_disconnect(struct usb_gadget *gadget)
 	if (cdev->config)
 		reset_config(cdev);
 
+#ifdef CONFIG_SWITCH
 	cdev->connected = 0;
 	if (cdev->mute_switch > 0)
 		cdev->mute_switch--;
 	else
 		schedule_work(&cdev->switch_work);
+#endif
 
 	spin_unlock_irqrestore(&cdev->lock, flags);
 }
@@ -1118,8 +1126,10 @@ composite_unbind(struct usb_gadget *gadget)
 	if (composite->unbind)
 		composite->unbind(cdev);
 
+#ifdef CONFIG_SWITCH
 	switch_dev_unregister(&cdev->sw_connected);
 	switch_dev_unregister(&cdev->sdev);
+#endif
 
 	if (cdev->req) {
 		kfree(cdev->req->buf);
@@ -1153,6 +1163,7 @@ string_override(struct usb_gadget_strings **tab, u8 id, const char *s)
 	}
 }
 
+#ifdef CONFIG_SWITCH
 static void
 composite_switch_work(struct work_struct *data)
 {
@@ -1176,6 +1187,7 @@ composite_switch_work(struct work_struct *data)
 	else
 		switch_set_state(&cdev->sdev, 0);
 }
+#endif
 
 static int composite_bind(struct usb_gadget *gadget)
 {
@@ -1220,6 +1232,7 @@ static int composite_bind(struct usb_gadget *gadget)
 	if (status < 0)
 		goto fail;
 
+#ifdef CONFIG_SWITCH
 	cdev->sw_connected.name = "usb_connected";
 	status = switch_dev_register(&cdev->sw_connected);
 	if (status < 0)
@@ -1231,6 +1244,7 @@ static int composite_bind(struct usb_gadget *gadget)
 	INIT_WORK(&cdev->switch_work, composite_switch_work);
 
 	cdev->mute_switch = 0;
+#endif
 	cdev->desc = *composite->dev;
 	cdev->desc.bMaxPacketSize0 = gadget->ep0->maxpacket;
 
