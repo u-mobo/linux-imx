@@ -10,6 +10,9 @@ menuconfig LOGO
 
 if LOGO
 
+config LOGO_CENTERED
+	bool "Center Linux logo"
+
 config FB_LOGO_EXTRA
 	bool
 	depends on FB=y

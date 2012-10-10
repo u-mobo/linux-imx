@@ -467,8 +467,14 @@ static int fb_show_logo_line(struct fb_info *info, int rotate,
 		image.data = logo_new;
 		fb_set_logo(info, logo, logo_new, fb_logo.depth);
 	}
-
+#ifdef CONFIG_LOGO_CENTERED
+	if (rotate == FB_ROTATE_UR || rotate == FB_ROTATE_UD)
+		image.dx = (info->var.xres - logo->width) >> 1;
+	else
+		image.dx = (info->var.yres - logo->width) >> 1;
+#else
 	image.dx = 0;
+#endif
 	image.dy = y;
 	image.width = logo->width;
 	image.height = logo->height;
@@ -565,7 +571,7 @@ static inline int fb_show_extra_logos(struct fb_info *info, int y, int rotate)
 int fb_prepare_logo(struct fb_info *info, int rotate)
 {
 	int depth = fb_get_color_depth(&info->var, &info->fix);
-	unsigned int yres;
+	unsigned int yres, height;
 
 	memset(&fb_logo, 0, sizeof(struct logo_data));
 
@@ -627,14 +633,26 @@ int fb_prepare_logo(struct fb_info *info, int rotate)
  		}
  	}
 
-	return fb_prepare_extra_logos(info, fb_logo.logo->height, yres);
+	height = fb_prepare_extra_logos(info, fb_logo.logo->height, yres);
+#ifdef CONFIG_LOGO_CENTERED
+	height += (yres - height) >> 1;
+#endif
+	return height;
 }
 
 int fb_show_logo(struct fb_info *info, int rotate)
 {
-	int y;
-
-	y = fb_show_logo_line(info, rotate, fb_logo.logo, 0,
+	int y = 0;
+#ifdef CONFIG_LOGO_CENTERED
+	unsigned int yres, height;
+	if (rotate == FB_ROTATE_UR || rotate == FB_ROTATE_UD)
+		yres = info->var.yres;
+	else
+		yres = info->var.xres;
+	height = fb_prepare_extra_logos(info, fb_logo.logo->height, yres);
+	y = (yres - height) >> 1;
+#endif
+	y = fb_show_logo_line(info, rotate, fb_logo.logo, y,
 			      num_online_cpus());
 	y = fb_show_extra_logos(info, y, rotate);
 
