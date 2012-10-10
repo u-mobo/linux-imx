@@ -1868,6 +1868,28 @@ done:
 	return ret;
 }
 
+int __initdata di0_logo_rotation = { 0 };
+static int __init di0_setup_logo_rotation(char *str)
+{
+	di0_logo_rotation = str[0] - '0';
+	if ((di0_logo_rotation < 0) || (di0_logo_rotation > 3))
+		di0_logo_rotation = 0;
+	return 1;
+}
+__setup("di0_logo_rotation=", di0_setup_logo_rotation);
+
+int __initdata di1_logo_rotation = { 0 };
+static int __init di1_setup_logo_rotation(char *str)
+{
+	di1_logo_rotation = str[0] - '0';
+	if ((di1_logo_rotation < 0) || (di1_logo_rotation > 3))
+		di1_logo_rotation = 0;
+	return 1;
+}
+__setup("di1_logo_rotation=", di1_setup_logo_rotation);
+
+extern int primary_di;
+
 /*!
  * Probe routine for the framebuffer driver. It is called during the
  * driver binding process.      The following functions are performed in
@@ -1884,7 +1906,9 @@ static int mxcfb_probe(struct platform_device *pdev)
 	char *options;
 	char name[] = "mxcdi0fb";
 	int ret = 0;
-
+#ifdef CONFIG_LOGO
+	int rotate = 0;
+#endif
 	/*
 	 * Initialize FB structures
 	 */
@@ -1992,8 +2016,20 @@ static int mxcfb_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Error %d on creating file\n", ret);
 
 #ifdef CONFIG_LOGO
-	fb_prepare_logo(fbi, 0);
-	fb_show_logo(fbi, 0);
+	switch (mxcfbi->ipu_di) {
+	case 0:
+		rotate = di0_logo_rotation;
+		break;
+	case 1:
+		rotate = di1_logo_rotation;
+		break;
+	default:
+		rotate = ((primary_di == 0) ? di0_logo_rotation : di1_logo_rotation);
+		break;
+	}
+	dev_dbg(&pdev->dev, "logo rotation = %d, DI%d, P%d\n", rotate, mxcfbi->ipu_di, primary_di);
+	fb_prepare_logo(fbi, rotate);
+	fb_show_logo(fbi, rotate);
 #endif
 
 	return 0;
