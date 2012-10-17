@@ -665,17 +665,19 @@ static int __devinit imx_3stack_sgtl5000_probe(struct platform_device *pdev)
 	   cycles after all power rails have been brought up. After this time
 	   communication can start */
 
-	if (plat->hp_status())
-		ret = request_irq(plat->hp_irq,
-				  imx_headphone_detect_handler,
-				  IRQ_TYPE_EDGE_FALLING, pdev->name, priv);
-	else
-		ret = request_irq(plat->hp_irq,
-				  imx_headphone_detect_handler,
-				  IRQ_TYPE_EDGE_RISING, pdev->name, priv);
-	if (ret < 0) {
-		pr_err("%s: request irq failed\n", __func__);
-		goto err_card_reg;
+	if (plat->hp_status) {
+		if (plat->hp_status())
+			ret = request_irq(plat->hp_irq,
+					  imx_headphone_detect_handler,
+					  IRQ_TYPE_EDGE_FALLING, pdev->name, priv);
+		else
+			ret = request_irq(plat->hp_irq,
+					  imx_headphone_detect_handler,
+					  IRQ_TYPE_EDGE_RISING, pdev->name, priv);
+		if (ret < 0) {
+			pr_err("%s: request irq failed\n", __func__);
+			goto err_card_reg;
+		}
 	}
 
 	setup = kzalloc(sizeof(struct sgtl5000_setup_data), GFP_KERNEL);
