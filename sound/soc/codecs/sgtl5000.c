@@ -1360,7 +1360,7 @@ static __devexit int sgtl5000_i2c_remove(struct i2c_client *client)
 	return 0;
 }
 
-static __devexit int sgtl5000_i2c_shutdown(struct i2c_client *client)
+static __devexit void sgtl5000_i2c_shutdown(struct i2c_client *client)
 {
 	struct snd_soc_codec *codec = i2c_get_clientdata(client);
 	int reg;
@@ -1371,7 +1371,6 @@ static __devexit int sgtl5000_i2c_shutdown(struct i2c_client *client)
 	reg &= ~SGTL5000_DAC_POWERUP;
 	reg &= ~SGTL5000_ADC_POWERUP;
 	sgtl5000_write(codec, SGTL5000_CHIP_ANA_POWER, reg);
-	return 0;
 }
 
 static const struct i2c_device_id sgtl5000_id[] = {
