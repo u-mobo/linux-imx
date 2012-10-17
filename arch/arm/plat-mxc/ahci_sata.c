@@ -200,6 +200,8 @@ static int sata_init(struct device *dev)
 	writel(tmpdata, mmio + HOST_TIMER1MS);
 
 	if (machine_is_mx53_smd() || machine_is_mx53_loco()
+			|| machine_is_mx53_umobo()
+			|| machine_is_x1plus()
 			|| board_is_mx53_ard_b()) {
 		/* FSL IMX AHCI SATA uses the internal usb phy1 clk */
 		sata_ref_clk = clk_get(NULL, "usb_phy1_clk");
@@ -297,6 +299,8 @@ static int sata_init(struct device *dev)
 
 				if (machine_is_mx53_smd()
 					|| machine_is_mx53_loco()
+					|| machine_is_mx53_umobo()
+					|| machine_is_x1plus()
 					|| board_is_mx53_ard_b())
 					goto no_device;
 				else
@@ -325,6 +329,8 @@ put_sata_clk:
 static void sata_exit(struct device *dev)
 {
 	if (machine_is_mx53_smd() || machine_is_mx53_loco()
+			|| machine_is_mx53_umobo()
+			|| machine_is_x1plus()
 			|| board_is_mx53_ard_b()) {
 		/* FSL IMX AHCI SATA uses the internal usb phy1 clk */
 		clk_disable(sata_ref_clk);
