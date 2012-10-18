@@ -380,13 +380,16 @@ static ssize_t show_headphone(struct device_driver *dev, char *buf)
 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
 	u16 hp_status;
 
-	/* determine whether hp is plugged in */
-	hp_status = plat->hp_status();
+	if (plat->hp_status) {
+		/* determine whether hp is plugged in */
+		hp_status = plat->hp_status();
 
-	if (hp_status == 0)
-		strcpy(buf, "speaker\n");
-	else
-		strcpy(buf, "headphone\n");
+		if (hp_status == 0)
+			strcpy(buf, "speaker\n");
+		else
+			strcpy(buf, "headphone\n");
+	} else
+		strcpy(buf, "unknown\n");
 
 	return strlen(buf);
 }
