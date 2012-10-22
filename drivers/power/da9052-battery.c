@@ -416,8 +416,9 @@ static void da9052_charger_status_update(struct da9052_charger_device
 	da9052_unlock(chg_device->da9052);
 
 
-	if ((regvalue & DA9052_STATUSA_DCINSEL)
-				&& (regvalue & DA9052_STATUSA_DCINDET)) {
+	if (chg_device->bat_pdata->force_ac_charger ||
+				((regvalue & DA9052_STATUSA_DCINSEL)
+				&& (regvalue & DA9052_STATUSA_DCINDET))) {
 
 		/*printk(KERN_INFO "BAT_LOG:\t BAT DCIN SEL/DET:\n");*/
 		if ((msg.data & DA9052_STATUSB_CHGEND) != 0)  {
@@ -488,7 +489,9 @@ static void da9052_charger_status_update(struct da9052_charger_device
 		bat_status.charger_type = DA9052_NOCHARGER;
 		bat_status.status = DA9052_DISCHARGING_WITHOUT_CHARGER;
 	}
-	return;
+
+	if (bat_status.illegalbattery)
+		bat_status.status = DA9052_NONE;
 }
 
 s32 da9052_get_bat_status(struct da9052_charger_device *chg_device,

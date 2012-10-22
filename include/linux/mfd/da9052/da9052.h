@@ -134,6 +134,7 @@ struct da9052_bat_platform_data {
 	u16	filter_size;
 	u16	bat_volt_cutoff;
 	u16	vbat_first_valid_detect_iteration;
+	u16	force_ac_charger;
 };
 
 struct da9052 {
