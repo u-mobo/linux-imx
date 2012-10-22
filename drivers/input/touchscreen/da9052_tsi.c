@@ -859,6 +859,10 @@ static ssize_t da9052_tsi_config_power_supply(struct da9052_ts_priv *priv,
 	struct da9052_ldo_config ldo_config;
 	struct da9052_tsi_info *ts = get_tsi_drvdata();
 
+	/* check for valid ldo number: 0 means externally managed */
+	if (!priv->tsi_pdata->tsi_ref_source)
+		return 0;
+
 	if (state != ENABLE && state != DISABLE) {
 		DA9052_DEBUG("DA9052_TSI: %s: ", __FUNCTION__);
 		DA9052_DEBUG("Invalid state Passed\n" );
