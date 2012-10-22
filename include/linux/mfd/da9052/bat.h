@@ -257,6 +257,8 @@ struct da9052_charger_device {
 	struct bat_thread_type	print_bat_status;
 #endif
 	struct power_supply		psy;
+	struct power_supply		psy_ac;
+	struct power_supply		psy_usb;
 	struct da9052_eh_nb		vddlow_eh_data;
 	struct da9052_eh_nb		tbat_eh_data;
 	u16				monitoring_interval;
