@@ -237,7 +237,7 @@ struct da9052_bat_device {
 };
 
 /* Below macro is for testing purpose only */
-#define DA9052_BAT_STATUS  1
+#define DA9052_BAT_STATUS  0
 
 #if (DA9052_BAT_STATUS == 1)
 struct bat_thread_type {
