@@ -29,6 +29,18 @@
 #define WAIT_FOR_SAMPLING	1
 #define SAMPLING_ACTIVE		2
 
+static int calibration[7] = {
+	DA9052_TSI_CALIB_AN,
+	DA9052_TSI_CALIB_BN,
+	DA9052_TSI_CALIB_CN,
+	DA9052_TSI_CALIB_DN,
+	DA9052_TSI_CALIB_EN,
+	DA9052_TSI_CALIB_FN,
+	DA9052_TSI_CALIB_DIVIDER
+};
+module_param_array(calibration, int, NULL, S_IRUGO | S_IWUSR);
+struct Calib_xform_matrix_t* xform = (struct Calib_xform_matrix_t*)calibration;
+
 static ssize_t __init da9052_tsi_create_input_dev(struct input_dev **ip_dev,
 					u8 n);
 static ssize_t read_da9052_reg(struct da9052 *da9052, u8 reg_addr);

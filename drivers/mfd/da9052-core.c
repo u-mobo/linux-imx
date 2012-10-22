@@ -26,6 +26,7 @@
 
 #include <linux/mfd/da9052/da9052.h>
 #include <linux/mfd/da9052/adc.h>
+#include <linux/mfd/da9052/tsi.h>
 
 #define SUCCESS		0
 #define FAILURE		1
@@ -429,7 +430,7 @@ static int add_da9052_devices(struct da9052 *da9052)
 	if (ret)
 		return ret;
 
-	ret = da9052_add_subdevice_pdata(da9052, "da9052-tsi",
+	ret = da9052_add_subdevice_pdata(da9052, DA9052_TSI_DEVICE_NAME,
 				&tsi_data, sizeof(tsi_data));
 	if (ret)
 		return ret;

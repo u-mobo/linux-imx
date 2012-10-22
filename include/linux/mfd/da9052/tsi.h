@@ -27,7 +27,7 @@
 #include <linux/mfd/da9052/tsi_calibrate.h>
 #include <linux/mfd/da9052/pm.h>
 
-#define DA9052_TSI_DEVICE_NAME		"da9052-tsi"
+#define DA9052_TSI_DEVICE_NAME		"da9052_tsi"
 #define DA9052_TSI_INPUT_DEV		DA9052_TSI_DEVICE_NAME
 
 #define TSI_VERSION 			0x0101
