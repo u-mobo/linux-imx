@@ -313,7 +313,7 @@ s32 da9052_tsi_raw_proc_thread(void *ptr)
 			input_report_abs(ip_dev, ABS_X, coord.x);
 			input_report_abs(ip_dev, ABS_Y, coord.y);
 			input_report_abs(ip_dev, ABS_PRESSURE, coord.z);
-			input_report_abs(ip_dev, BTN_TOUCH, 1);
+			input_report_key(ip_dev, BTN_TOUCH, 1);
 			input_sync(ip_dev);
 
 			priv->os_data_cnt++;
