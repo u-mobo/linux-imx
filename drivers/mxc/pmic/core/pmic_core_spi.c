@@ -103,8 +103,12 @@ enum pmic_id {
 };
 
 struct pmic_internal pmic_internal[] = {
+#ifdef CONFIG_MXC_PMIC_MC13892
 	[PMIC_ID_MC13892] = _PMIC_INTERNAL_INITIALIZER(mc13892),
+#endif
+#ifdef CONFIG_MXC_PMIC_MC34708
 	[PMIC_ID_MC34708] = _PMIC_INTERNAL_INITIALIZER(mc34708),
+#endif
 };
 
 /*
