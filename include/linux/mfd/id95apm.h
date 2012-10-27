@@ -389,6 +389,11 @@ struct id95apm_codec {
 	struct snd_soc_codec *codec;
 };
 
+struct id95apm_pwrkey {
+	struct input_dev *input;
+	int codes[2];
+};
+
 /* Structure for each ID95APM Slave */
 struct id95apm {
 	struct device *dev;
@@ -411,10 +416,16 @@ struct id95apm {
 	struct rtc_device *rtc;
 
 	struct id95apm_codec codec;
+
+	struct id95apm_pwrkey pwrkey;
 };
 
 struct id95apm_gpio_init {
 	int gpio_base;
+};
+
+struct id95apm_pwrkey_init {
+	int codes[2];
 };
 
 /**
@@ -434,6 +445,9 @@ struct id95apm_platform_data {
 
 	/* GPIO */
 	struct id95apm_gpio_init id95apm_gpio_init;
+
+	/* Power Switch Detector: SW_DET */
+	struct id95apm_pwrkey_init pwrkey_init;
 };
 
 /* Device I/O API */
