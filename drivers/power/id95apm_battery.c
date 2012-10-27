@@ -17,6 +17,7 @@
 #include <linux/power_supply.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/id95apm.h>
+#include <linux/slab.h>
 
 static int id95apm_battery_status(struct id95apm *id95apm)
 {
