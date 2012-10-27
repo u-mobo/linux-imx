@@ -22,6 +22,7 @@
 #include <linux/workqueue.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/id95apm.h>
+#include <linux/slab.h>
 
 /* test-only: sysfs support only for testing purpose */
 #define CONFIG_TESTING_SYSFS
