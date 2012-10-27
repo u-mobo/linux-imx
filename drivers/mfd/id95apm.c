@@ -461,6 +461,9 @@ static int id95apm_init(struct id95apm *id95apm, int irq,
 	/* Disable SW interrupts */
 	id95apm_reg_write(id95apm, ID95APM_PCON_SW_IRQ, 0x00);
 
+	/* Dispatch interrupts to both internal and external processors */
+	id95apm_clrset_bits(id95apm, ID95APM_ACCM_IRQ_DIR1, 0x80, 0x80);
+
 	/*
 	 * Init this irq stuff *before* the subdevices are initialized
 	 */
