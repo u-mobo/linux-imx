@@ -582,7 +582,7 @@ static int __devinit id95apm_regulator_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, rdev);
 	id95apm->rdev[pdev->id] = rdev;
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,30))
+#if 0
 	if (id95apm->pdata->regulator_registered)
 		id95apm->pdata->regulator_registered(id95apm, pdev->id);
 #endif
