@@ -394,6 +394,12 @@ struct id95apm_pwrkey {
 	int codes[2];
 };
 
+struct id95apm_tsc {
+	struct input_dev *input;
+	struct delayed_work work;
+	int button_pressed;
+};
+
 /* Structure for each ID95APM Slave */
 struct id95apm {
 	struct device *dev;
@@ -418,6 +424,8 @@ struct id95apm {
 	struct id95apm_codec codec;
 
 	struct id95apm_pwrkey pwrkey;
+
+	struct id95apm_tsc tsc;
 };
 
 struct id95apm_gpio_init {
