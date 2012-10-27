@@ -447,6 +447,7 @@ struct id95apm_platform_data {
 	/* Core driver */
 	int (*init)(struct id95apm *id95apm);
 	int irq_high;
+	u16 pll_stat;
 
 	/* Regulator */
 	struct regulator_init_data reg_init_data[ID95APM_NUM_REGULATORS];

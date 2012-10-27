@@ -458,6 +458,9 @@ static int id95apm_init(struct id95apm *id95apm, int irq,
 			    ID95APM_PCON_PLL_CFG_MASK,
 			    ID95APM_PCON_PLL_CFG_32KHZ);
 
+	if (pdata->pll_stat)
+		id95apm_reg_write(id95apm, ID95APM_PCON_PLL_STAT, pdata->pll_stat);
+
 	/* Disable SW interrupts */
 	id95apm_reg_write(id95apm, ID95APM_PCON_SW_IRQ, 0x00);
 
