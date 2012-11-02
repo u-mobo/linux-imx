@@ -540,7 +540,7 @@ static int id95apm_init(struct id95apm *id95apm, int irq,
 	/*
 	 * touch subdevice
 	 */
-	pdev = id95apm_add_pdev(id95apm, NULL, "id95apm-tsc", 0);
+	pdev = id95apm_add_pdev(id95apm, NULL, ID95APM_TSC_NAME, 0);
 	if (!pdev)
 		goto err;
 

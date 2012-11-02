@@ -394,6 +394,8 @@ struct id95apm_pwrkey {
 	int codes[2];
 };
 
+#define ID95APM_TSC_NAME "id95apm_ts"
+
 struct id95apm_tsc {
 	struct input_dev *input;
 	struct delayed_work work;

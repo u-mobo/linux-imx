@@ -37,8 +37,6 @@
 #define ID95APM_TSC_UPDATE_INTERVAL	0
 #define ID95APM_EN_MEASURE	((ID95APM_TSC_UPDATE_INTERVAL << 4) | 0x01)
 
-#define ID95APM_TSC_NAME "id95apm_ts"
-
 /**
  * calibration array refers to
  * (delta_x[0], delta_x[1], delta_x[2], delta_y[0], delta_y[1], delta_y[2], delta).
@@ -110,11 +108,11 @@ static void id95apm_tsc_irq_handler(struct id95apm *id95apm, int irq, void *data
 			dev_dbg(id95apm->dev, "z1:%d, z2:%d, rt:%d\n",
 				z1, z2, rt);
 		}
-		do_calibration(&x, &y);
 		if (invert_x)
 			x = (~x) & 0xfff;
 		if (invert_y)
 			y = (~y) & 0xfff;
+		do_calibration(&x, &y);
 		input_report_abs(id95apm->tsc.input, ABS_X, x);
 		input_report_abs(id95apm->tsc.input, ABS_Y, y);
 		input_report_abs(id95apm->tsc.input, ABS_PRESSURE, rt);
