@@ -27,18 +27,41 @@
 
 #define ID95APM_PWRKEY_NAME "id95apm-pwrkey"
 
+static void id95apm_shortkey_monitor(struct work_struct *work)
+{
+	struct id95apm_pwrkey *pwrkey = container_of(work, struct id95apm_pwrkey, shortkey_monitor.work);
+	struct id95apm *id95apm = container_of(pwrkey, struct id95apm, pwrkey);
+
+	mutex_lock(&pwrkey->shortkey_mutex);
+	input_report_key(pwrkey->input, pwrkey->codes[pwrkey->shortkey_counter], 1);
+	input_report_key(pwrkey->input, pwrkey->codes[pwrkey->shortkey_counter], 0);
+	dev_dbg(id95apm->dev, "id95apm_shortkey_monitor on key[%d] %d\n",
+		pwrkey->shortkey_counter,
+		pwrkey->codes[pwrkey->shortkey_counter]);
+	pwrkey->shortkey_counter = 0;
+	mutex_unlock(&pwrkey->shortkey_mutex);
+}
+
 static void id95apm_pwrkey_irq_handler(struct id95apm *id95apm, int irq, void *data)
 {
 	if (irq == ID95APM_IRQ_SHORT_SW) {
-		input_report_key(id95apm->pwrkey.input, id95apm->pwrkey.codes[0], 1);
+		mutex_lock(&id95apm->pwrkey.shortkey_mutex);
+		if (!id95apm->pwrkey.shortkey_counter)
+			queue_delayed_work(id95apm->pwrkey.shortkey_workq,
+				&id95apm->pwrkey.shortkey_monitor,
+				id95apm->pwrkey.shortkey_monitor_intervall);
+		id95apm->pwrkey.shortkey_counter++;
+		mutex_unlock(&id95apm->pwrkey.shortkey_mutex);
+
 		id95apm_clrset_bits(id95apm, ID95APM_PCON_SW_STAT, 0xff, 0x01);
-		input_report_key(id95apm->pwrkey.input, id95apm->pwrkey.codes[0], 0);
-		dev_dbg(id95apm->dev, "ID95APM_IRQ_SHORT_SW on %d\n", id95apm->pwrkey.codes[0]);
+		dev_dbg(id95apm->dev, "ID95APM_IRQ_SHORT_SW on key[%d] %d\n",
+			id95apm->pwrkey.shortkey_counter,
+			id95apm->pwrkey.codes[id95apm->pwrkey.shortkey_counter]);
 	} else if (irq == ID95APM_IRQ_MID_SW) {
-		input_report_key(id95apm->pwrkey.input, id95apm->pwrkey.codes[1], 1);
+		input_report_key(id95apm->pwrkey.input, id95apm->pwrkey.codes[0], 1);
 		id95apm_clrset_bits(id95apm, ID95APM_PCON_SW_STAT, 0xff, 0x04);
-		input_report_key(id95apm->pwrkey.input, id95apm->pwrkey.codes[1], 0);
-		dev_dbg(id95apm->dev, "ID95APM_IRQ_MID_SW on %d\n", id95apm->pwrkey.codes[1]);
+		input_report_key(id95apm->pwrkey.input, id95apm->pwrkey.codes[0], 0);
+		dev_dbg(id95apm->dev, "ID95APM_IRQ_MID_SW on key %d\n", id95apm->pwrkey.codes[0]);
 	}
 }
 
@@ -46,7 +69,16 @@ static int id95apm_pwrkey_probe(struct platform_device *pdev)
 {
 	struct id95apm *id95apm = platform_get_drvdata(pdev);
 	struct id95apm_pwrkey_init *pdata = pdev->dev.platform_data;
-	int ret;
+	int i, ret;
+
+	mutex_init(&id95apm->pwrkey.shortkey_mutex);
+	id95apm->pwrkey.shortkey_workq = create_singlethread_workqueue("kid95apmshortkey");
+	if (id95apm->pwrkey.shortkey_workq == NULL) {
+		dev_err(&pdev->dev, "create singlethread workqueue failed\n");
+		return -EINVAL;
+	}
+	INIT_DELAYED_WORK(&id95apm->pwrkey.shortkey_monitor, id95apm_shortkey_monitor);
+	id95apm->pwrkey.shortkey_counter = 0;
 
 	id95apm->pwrkey.input = input_allocate_device();
 	if (!id95apm->pwrkey.input) {
@@ -61,15 +93,15 @@ static int id95apm_pwrkey_probe(struct platform_device *pdev)
 	id95apm->pwrkey.input->id.bustype = BUS_HOST;
 	id95apm->pwrkey.input->evbit[0] = BIT_MASK(EV_KEY);
 
-	id95apm->pwrkey.codes[0] = pdata->codes[0];
-	id95apm->pwrkey.codes[1] = pdata->codes[1];
+	memcpy(id95apm->pwrkey.codes, pdata->codes, sizeof(pdata->codes));
+	if (pdata->shortkey_monitor_intervall)
+		id95apm->pwrkey.shortkey_monitor_intervall = pdata->shortkey_monitor_intervall;
+	else
+		id95apm->pwrkey.shortkey_monitor_intervall = msecs_to_jiffies(500);
 
-	if (id95apm->pwrkey.codes[0]) {
-		input_set_capability(id95apm->pwrkey.input, EV_KEY, id95apm->pwrkey.codes[0]);
-	}
-	if (id95apm->pwrkey.codes[1]) {
-		input_set_capability(id95apm->pwrkey.input, EV_KEY, id95apm->pwrkey.codes[1]);
-	}
+	for (i = 0; i < ID95APM_PWRKEY_NUM_CODES; i++)
+		if (id95apm->pwrkey.codes[i])
+			input_set_capability(id95apm->pwrkey.input, EV_KEY, id95apm->pwrkey.codes[i]);
 
 	input_set_drvdata(id95apm->pwrkey.input, id95apm);
 
@@ -79,14 +111,12 @@ static int id95apm_pwrkey_probe(struct platform_device *pdev)
 		goto err_register;
 	}
 
-	/* Register pwrkey interrupts */
+	id95apm_register_irq(id95apm, ID95APM_IRQ_SHORT_SW, id95apm_pwrkey_irq_handler, NULL);
+	dev_info(&pdev->dev, "Registered keys %d, %d on ID95APM_IRQ_SHORT_SW\n", id95apm->pwrkey.codes[1], id95apm->pwrkey.codes[2]);
 	if (id95apm->pwrkey.codes[0]) {
-		id95apm_register_irq(id95apm, ID95APM_IRQ_SHORT_SW, id95apm_pwrkey_irq_handler, NULL);
-		dev_info(&pdev->dev, "Registered key %d on ID95APM_IRQ_SHORT_SW\n", id95apm->pwrkey.codes[0]);
-	}
-	if (id95apm->pwrkey.codes[1]) {
+		/* Register medium press interrupts */
 		id95apm_register_irq(id95apm, ID95APM_IRQ_MID_SW, id95apm_pwrkey_irq_handler, NULL);
-		dev_info(&pdev->dev, "Registered key %d on ID95APM_IRQ_MID_SW\n", id95apm->pwrkey.codes[1]);
+		dev_info(&pdev->dev, "Registered key %d on ID95APM_IRQ_MID_SW\n", id95apm->pwrkey.codes[0]);
 	}
 	
 	//id95apm_clrset_bits(id95apm, ID95APM_PCON_SW_STAT, 0x05, 0x05);
@@ -97,8 +127,9 @@ static int id95apm_pwrkey_probe(struct platform_device *pdev)
 	return 0;
 
 err_register:
-	input_free_device(id95apm->tsc.input);
+	input_free_device(id95apm->pwrkey.input);
 err_allocate:
+	destroy_workqueue(id95apm->pwrkey.shortkey_workq);
 	return ret;
 }
 
@@ -114,6 +145,7 @@ static int id95apm_pwrkey_remove(struct platform_device *pdev)
 
 	input_unregister_device(id95apm->pwrkey.input);
 	input_free_device(id95apm->pwrkey.input);
+	destroy_workqueue(id95apm->pwrkey.shortkey_workq);
 
 	return 0;
 }
