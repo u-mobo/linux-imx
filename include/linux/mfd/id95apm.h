@@ -389,9 +389,16 @@ struct id95apm_codec {
 	struct snd_soc_codec *codec;
 };
 
+#define ID95APM_PWRKEY_NUM_CODES	10
+
 struct id95apm_pwrkey {
 	struct input_dev *input;
-	int codes[2];
+	struct mutex shortkey_mutex;
+	struct workqueue_struct *shortkey_workq;
+	struct delayed_work shortkey_monitor;
+	int shortkey_monitor_intervall;
+	int shortkey_counter;
+	int codes[ID95APM_PWRKEY_NUM_CODES];
 };
 
 #define ID95APM_TSC_NAME "id95apm_ts"
@@ -435,7 +442,8 @@ struct id95apm_gpio_init {
 };
 
 struct id95apm_pwrkey_init {
-	int codes[2];
+	int shortkey_monitor_intervall;
+	int codes[ID95APM_PWRKEY_NUM_CODES];
 };
 
 /**
