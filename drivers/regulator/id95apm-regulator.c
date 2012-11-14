@@ -132,7 +132,7 @@ static struct id95apm_regulator id95apm_reg[] = {
 static u8 ldo_en[] = { 0x10, 0x20, 0x40, 0x01, 0x02, 0x04, 0x08 };
 
 /* DC/DC global enable bits (ID95APM_GLOB_DCDC_ENABLE) */
-static u8 dcdc_en[] = { 0x01, 0x02, 0x04, 0x08, 0x80, 0x10 };
+static u8 dcdc_en[] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x80 };
 
 static u8 value_to_bits(int id, unsigned int value)
 {
@@ -169,7 +169,7 @@ static int id95apm_set_value(struct regulator_dev *rdev, int min_uX, int max_uX)
 {
 	struct id95apm *id95apm;
 	int id, milli;
-	u8 bits;
+	u8 bits, mask = ID95APM_LDO_VSET_MASK;
 
 	id95apm = rdev_get_drvdata(rdev);
 
@@ -201,6 +201,7 @@ static int id95apm_set_value(struct regulator_dev *rdev, int min_uX, int max_uX)
 		 */
 		id95apm_clrset_bits(id95apm, id95apm_reg[id].reg,
 				    0, ID95APM_LED_BOOST_SCALE_FULL);
+		mask = ID95APM_LED_BOOST_CSET_MASK;
 
 	default:
 		/*
@@ -210,8 +211,7 @@ static int id95apm_set_value(struct regulator_dev *rdev, int min_uX, int max_uX)
 		bits = value_to_bits(id, milli);
 	}
 
-	return id95apm_clrset_bits(id95apm, id95apm_reg[id].reg,
-				   ID95APM_LDO_VSET_MASK, bits);
+	return id95apm_clrset_bits(id95apm, id95apm_reg[id].reg, mask, bits);
 }
 
 static int id95apm_value(enum id95apm_regulator_id id, u8 bits)
@@ -241,7 +241,7 @@ static int id95apm_get_value(struct regulator_dev *rdev)
 {
 	struct id95apm *id95apm;
 	int id;
-	u8 bits;
+	u8 bits, mask;
 
 	id95apm = rdev_get_drvdata(rdev);
 
@@ -249,8 +249,12 @@ static int id95apm_get_value(struct regulator_dev *rdev)
 	if (id_valid(id))
 		return -EINVAL;
 
-	bits = id95apm_reg_read(id95apm, id95apm_reg[id].reg) &
-		ID95APM_LDO_VSET_MASK;
+	if (id == ID95APM_REGULATOR_DCDC4)
+		mask = ID95APM_LED_BOOST_CSET_MASK;
+	else
+		mask = ID95APM_LDO_VSET_MASK;
+
+	bits = id95apm_reg_read(id95apm, id95apm_reg[id].reg) & mask;
 
 	return id95apm_value(id, bits);
 }
