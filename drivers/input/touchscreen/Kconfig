@@ -691,4 +691,15 @@ config TOUCHSCREEN_ID95APM
 	  Say Y here to enable support for Touch Screen Controller
 	  provided by the IDT ID95APM PMIC
 
+config TOUCHSCREEN_CLICKTOUCH
+	tristate "ClickTouch touchscreens"
+	depends on I2C
+	help
+	  Say Y here if you have a ClickTouch touchscreen.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called clicktouch_ts.
+
 endif
