@@ -150,15 +150,17 @@ static int mag3110_read_data(short *x, short *y, short *z)
 		return -EINVAL;
 
 	data = mag3110_pdata;
-	if (!wait_event_interruptible_timeout
-	    (data->waitq, data->data_ready != 0,
-	     msecs_to_jiffies(INT_TIMEOUT))) {
-		dev_dbg(&data->client->dev, "interrupt not received\n");
-		return -ETIME;
-	}
+	if (data->client->irq) {
+		if (!wait_event_interruptible_timeout
+		    (data->waitq, data->data_ready != 0,
+		     msecs_to_jiffies(INT_TIMEOUT))) {
+			dev_dbg(&data->client->dev, "interrupt not received\n");
+			return -ETIME;
+		}
 
-	/* Clear data_ready flag after data is read out */
-	data->data_ready = 0;
+		/* Clear data_ready flag after data is read out */
+		data->data_ready = 0;
+	}
 
 	if (mag3110_read_block_data(data->client,
 			MAG3110_OUT_X_MSB, MAG3110_XYZ_DATA_LEN, tmp_data) < 0)
@@ -374,13 +376,15 @@ static int __devinit mag3110_probe(struct i2c_client *client,
 		goto error_free_poll_dev;
 	}
 
-	/* set irq type to edge rising */
-	ret = request_irq(client->irq, mag3110_irq_handler,
-			  IRQF_TRIGGER_RISING, client->dev.driver->name, idev);
-	if (ret < 0) {
-		dev_err(&client->dev, "failed to register irq %d!\n",
-			client->irq);
-		goto error_rm_poll_dev;
+	if (client->irq) {
+		/* set irq type to edge rising */
+		ret = request_irq(client->irq, mag3110_irq_handler,
+				  IRQF_TRIGGER_RISING, client->dev.driver->name, idev);
+		if (ret < 0) {
+			dev_err(&client->dev, "failed to register irq %d!\n",
+				client->irq);
+			goto error_rm_poll_dev;
+		}
 	}
 
 	/* Initialize mag3110 chip */
@@ -426,7 +430,8 @@ static int __devexit mag3110_remove(struct i2c_client *client)
 
 	data = i2c_get_clientdata(client);
 	ret = mag3110_stop_chip(client);
-	free_irq(client->irq, data);
+	if (client->irq)
+		free_irq(client->irq, data);
 	input_unregister_polled_device(data->poll_dev);
 	input_free_polled_device(data->poll_dev);
 	hwmon_device_unregister(data->hwmon_dev);
