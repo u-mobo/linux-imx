@@ -60,6 +60,14 @@ config SND_SOC_IMX_3STACK_SGTL5000
 	  Say Y if you want to add support for SoC audio on IMX 3STACK
 	  with the SGTL5000.
 
+config SND_SOC_IMX_3STACK_ID95APM
+	tristate "SoC Audio support for IMX - ID95APM"
+	select SND_MXC_SOC_SSI
+	select SND_SOC_ID95APM
+	help
+	  Say Y if you want to add support for SoC audio on IMX 3STACK
+	  with the ID95APM.
+
 config SND_SOC_IMX_3STACK_AK4647
 	tristate "SoC Audio support for IMX - AK4647"
 	select SND_MXC_SOC_SSI

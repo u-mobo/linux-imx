@@ -18,7 +18,9 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
+#define DEBUG
 
+#include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -40,7 +42,7 @@
  * ID95APM register cache & default register settings
  * Start with ID95APM_DAC0L_VOL (0x1a0)
  */
-static const u8 id95apm_reg[ID95APM_REG_NUM] = {
+static const u8 id95apm_reg[ID95APM_AUDIO_REG_NUM] = {
 	0x80, 0x80, 0x80, 0x80, 0x00, 0x00, 0x80, 0x80, /* 0x1a0 ... */
 	0x85, 0x85, 0x85, 0x85, 0x85, 0x85, 0x85, 0x85,
 	0x80, 0x80, 0x00, 0x00, 0x8f, 0x8f, 0x33, 0x00, /* 0x1b0 ... */
@@ -86,7 +88,7 @@ static unsigned int id95apm_read(struct snd_soc_codec *codec,
 static int id95apm_write(struct snd_soc_codec *codec,
 			 unsigned int reg, unsigned int value)
 {
-	struct id95apm *id95apm = (struct id95apm *)codec->private_data;
+	struct id95apm *id95apm = snd_soc_codec_get_drvdata(codec);
 	u8 *cache = codec->reg_cache;
 	int status = 0;
 
@@ -299,11 +301,12 @@ static int id95apm_add_widgets(struct snd_soc_codec *codec)
  * Set PCM DAI bit size and sample rate.
  */
 static int id95apm_hw_params(struct snd_pcm_substream *substream,
-			     struct snd_pcm_hw_params *params)
+			     struct snd_pcm_hw_params *params,
+			     struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_device *socdev = rtd->socdev;
-	struct snd_soc_codec *codec = socdev->codec;
+	struct snd_soc_codec *codec = socdev->card->codec;
 	u8 i2s_cfg = 0;
 
 	pr_debug("%s\n", __func__);
@@ -441,7 +444,7 @@ static int id95apm_set_clkdiv(struct snd_soc_dai *codec_dai,
 static int id95apm_set_bias_level(struct snd_soc_codec *codec,
 				  enum snd_soc_bias_level level)
 {
-	struct id95apm *id95apm = (struct id95apm *)codec->private_data;
+	struct id95apm *id95apm = snd_soc_codec_get_drvdata(codec);
 	u8 *cache = codec->reg_cache;
 
 	switch (level) {
@@ -471,29 +474,35 @@ static int id95apm_set_bias_level(struct snd_soc_codec *codec,
 #define ID95APM_FORMATS	 (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE | \
 			  SNDRV_PCM_FMTBIT_S24_LE)
 
+struct snd_soc_dai_ops id95apm_ops = {
+	//.prepare = id95apm_prepare,
+	//.startup = id95apm_startup,
+	//.shutdown = id95apm_shutdown,
+	.hw_params = id95apm_hw_params,
+	//.digital_mute = id95apm_digital_mute,
+	.set_fmt = id95apm_set_dai_fmt,
+	//.set_sysclk = id95apm_set_dai_sysclk
+	.set_clkdiv = id95apm_set_clkdiv,
+};
+
 struct snd_soc_dai id95apm_dai = {
 	.name = "ID95APM",
 	.id = 0,
 	.playback = {
 		.stream_name = "Playback",
-		.channels_min = 2,
+		.channels_min = 1,
 		.channels_max = 2,
 		.rates = ID95IPM_RATES,
 		.formats = ID95APM_FORMATS,
 	},
 	.capture = {
 		 .stream_name = "Capture",
-		 .channels_min = 2,
+		 .channels_min = 1,
 		 .channels_max = 2,
 		 .rates = ID95IPM_RATES,
-		 .formats = ID95APM_FORMATS,},
-	.ops = {
-		 .hw_params = id95apm_hw_params,
-	 },
-	.dai_ops = {
-		 .set_fmt = id95apm_set_dai_fmt,
-		 .set_clkdiv = id95apm_set_clkdiv,
-	 },
+		 .formats = ID95APM_FORMATS,
+	},
+	.ops = &id95apm_ops,
 };
 EXPORT_SYMBOL_GPL(id95apm_dai);
 
@@ -503,8 +512,10 @@ EXPORT_SYMBOL_GPL(id95apm_dai);
  * Register accessed here are not from the ID95APM audio
  * part, but from other ID95APM subsystem.
  */
-int id95apm_enable_audio(struct id95apm *id95apm)
+int id95apm_enable_audio(struct snd_soc_codec *codec)
 {
+	struct id95apm *id95apm = snd_soc_codec_get_drvdata(codec);
+
 	pr_debug("%s\n", __func__);
 
 	/* Enable 48 MHz, SSC for DCDC, S1 */
@@ -542,8 +553,10 @@ int id95apm_enable_audio(struct id95apm *id95apm)
  * Register accessed here are not from the ID95APM audio
  * part, but from other ID95APM subsystem.
  */
-int id95apm_disable_audio(struct id95apm *id95apm)
+int id95apm_disable_audio(struct snd_soc_codec *codec)
 {
+	struct id95apm *id95apm = snd_soc_codec_get_drvdata(codec);
+
 	pr_debug("%s\n", __func__);
 
 	/* Disable Audio (power down) */
@@ -558,38 +571,21 @@ int id95apm_disable_audio(struct id95apm *id95apm)
 	return 0;
 }
 
+static struct snd_soc_codec *id95apm_codec;
+
 /*
  * Initialize the ID95APM audio device
  * register the mixer and dsp interfaces with the kernel
  */
-static int id95apm_init(struct snd_soc_device *socdev)
+static int id95apm_probe(struct platform_device *pdev)
 {
-	struct snd_soc_codec *codec = socdev->codec;
-	struct id95apm *id95apm = (struct id95apm *)codec->private_data;
+	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
+	struct snd_soc_codec *codec = id95apm_codec;
 	int status;
 
 	pr_debug("%s\n", __func__);
 
-	codec->name = "ID95APM";
-	codec->owner = THIS_MODULE;
-	codec->read = id95apm_read;
-	codec->write = id95apm_write;
-	codec->dai = &id95apm_dai;
-	codec->num_dai = 1;
-	codec->reg_cache_size = ARRAY_SIZE(id95apm_reg);
-	codec->reg_cache = kmemdup(id95apm_reg, sizeof(id95apm_reg),
-				   GFP_KERNEL);
-	codec->bias_level = SND_SOC_BIAS_OFF;
-
-	if (codec->reg_cache == NULL)
-		return -ENOMEM;
-
-	status = id95apm_enable_audio(id95apm);
-	if (status < 0) {
-		pr_err("%s: failed to enable AUDIO module\n", codec->name);
-		goto hw_err;
-	}
-
+	socdev->card->codec = codec;
 	/*
 	 * Make initial settings (routing etc)
 	 */
@@ -642,28 +638,63 @@ static int id95apm_init(struct snd_soc_device *socdev)
 	id95apm_add_controls(codec);
 	id95apm_add_widgets(codec);
 
-	status = snd_soc_register_card(socdev);
-	if (status < 0) {
-		pr_err("%s: failed to register card\n", codec->name);
-		goto card_err;
-	}
 	return status;
 
-card_err:
-	snd_soc_free_pcms(socdev);
-	snd_soc_dapm_free(socdev);
 pcm_err:
 	kfree(codec->reg_cache);
-hw_err:
+
 	return status;
 }
 
-static int id95apm_codec_probe(struct platform_device *pdev)
+static int id95apm_remove(struct platform_device *pdev)
 {
 	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
+	struct snd_soc_codec *codec = socdev->card->codec;
+
+	dev_info(&pdev->dev, "ID95APM Audio device removed\n");
+
+	id95apm_set_bias_level(codec, SND_SOC_BIAS_OFF);
+
+	id95apm_disable_audio(codec);
+
+	snd_soc_free_pcms(socdev);
+	snd_soc_dapm_free(socdev);
+	kfree(codec);
+
+	return 0;
+}
+
+static int id95apm_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
+	struct snd_soc_codec *codec = socdev->card->codec;
+
+	id95apm_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	return 0;
+}
+
+static int id95apm_resume(struct platform_device *pdev)
+{
+	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
+	struct snd_soc_codec *codec = socdev->card->codec;
+
+	id95apm_set_bias_level(codec, SND_SOC_BIAS_ON);
+	return 0;
+}
+
+struct snd_soc_codec_device id95apm_soc_codec_dev = {
+	.probe = id95apm_probe,
+	.remove = id95apm_remove,
+	.suspend = id95apm_suspend,
+	.resume = id95apm_resume,
+};
+EXPORT_SYMBOL_GPL(id95apm_soc_codec_dev);
+
+static int id95apm_codec_probe(struct platform_device *pdev)
+{
+	struct id95apm *id95apm = platform_get_drvdata(pdev);
 	struct snd_soc_codec *codec;
 	int status = 0;
-	struct id95apm *id95apm = id95apm_get_id95apm();
 
 	if (id95apm == NULL) {
 		dev_err(&pdev->dev, "ID95APM MFD core driver not loaded\n");
@@ -674,70 +705,90 @@ static int id95apm_codec_probe(struct platform_device *pdev)
 	if (codec == NULL)
 		return -ENOMEM;
 
-	socdev->codec = codec;
+	id95apm->codec.codec = codec;
 	mutex_init(&codec->mutex);
 	INIT_LIST_HEAD(&codec->dapm_widgets);
 	INIT_LIST_HEAD(&codec->dapm_paths);
-	codec->private_data = id95apm;
+	snd_soc_codec_set_drvdata(codec, id95apm);
 
-	status = id95apm_init(socdev);
-	if (status < 0)
+	codec->name = "ID95APM";
+	codec->owner = THIS_MODULE;
+	codec->read = id95apm_read;
+	codec->write = id95apm_write;
+	codec->dai = &id95apm_dai;
+	codec->num_dai = 1;
+	codec->reg_cache_size = ARRAY_SIZE(id95apm_reg);
+	codec->reg_cache = kmemdup(id95apm_reg, sizeof(id95apm_reg),
+				   GFP_KERNEL);
+	codec->bias_level = SND_SOC_BIAS_OFF;
+
+	if (codec->reg_cache == NULL)
 		goto err_free;
+
+	status = id95apm_enable_audio(codec);
+	if (status < 0) {
+		pr_err("%s: failed to enable AUDIO module\n", codec->name);
+		goto err_free;
+	}
+
+	status = snd_soc_register_codec(codec);
+	if (status < 0) {
+		pr_err("%s: failed to register card (%d)\n", codec->name, status);
+		goto err_free;
+	}
+
+	id95apm_codec = codec;
+
+	status = snd_soc_register_dai(&id95apm_dai);
+	if (status < 0) {
+		pr_err("%s: failed to register DAIs (%d)\n", codec->name, status);
+		goto err_codec;
+	}
 
 	dev_info(&pdev->dev, "ID95APM Audio device found\n");
 
 	return status;
 
+err_codec:
+	snd_soc_unregister_codec(codec);
 err_free:
 	kfree(codec);
+	id95apm_codec = NULL;
 	return status;
 }
 
-static int id95apm_codec_remove(struct platform_device *pdev)
+static int __devexit id95apm_codec_remove(struct platform_device *pdev)
 {
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-	struct snd_soc_codec *codec = socdev->codec;
-	struct id95apm *id95apm = (struct id95apm *)codec->private_data;
+	struct id95apm *id95apm = platform_get_drvdata(pdev);
+	struct snd_soc_codec *codec = id95apm->codec.codec;
 
-	dev_info(&pdev->dev, "ID95APM Audio device removed\n");
-
-	id95apm_set_bias_level(codec, SND_SOC_BIAS_OFF);
-
-	id95apm_disable_audio(id95apm);
-
-	snd_soc_free_pcms(socdev);
-	snd_soc_dapm_free(socdev);
-	kfree(codec->private_data);
+	snd_soc_unregister_dai(&id95apm_dai);
+	snd_soc_unregister_codec(codec);
 	kfree(codec);
-
+	id95apm_codec = NULL;
 	return 0;
 }
 
-static int id95apm_suspend(struct platform_device *pdev, pm_message_t state)
-{
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-	struct snd_soc_codec *codec = socdev->codec;
-
-	id95apm_set_bias_level(codec, SND_SOC_BIAS_OFF);
-	return 0;
-}
-
-static int id95apm_resume(struct platform_device *pdev)
-{
-	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
-	struct snd_soc_codec *codec = socdev->codec;
-
-	id95apm_set_bias_level(codec, SND_SOC_BIAS_ON);
-	return 0;
-}
-
-struct snd_soc_codec_device id95apm_soc_codec_dev = {
+static struct platform_driver id95apm_codec_driver = {
+	.driver = {
+		.name = "id95apm-codec",
+		.owner = THIS_MODULE,
+	},
 	.probe = id95apm_codec_probe,
-	.remove = id95apm_codec_remove,
-	.suspend = id95apm_suspend,
-	.resume = id95apm_resume,
+	.remove	= __exit_p(id95apm_codec_remove),
 };
-EXPORT_SYMBOL_GPL(id95apm_soc_codec_dev);
+
+static int __init id95apm_codec_init(void)
+{
+	return platform_driver_register(&id95apm_codec_driver);
+}
+module_init(id95apm_codec_init);
+
+static void __exit id95apm_codec_exit(void)
+{
+	platform_driver_unregister(&id95apm_codec_driver);
+}
+module_exit(id95apm_codec_exit);
 
 MODULE_DESCRIPTION("ASoC ID95APM driver");
 MODULE_AUTHOR("Vitaliy Kulikov <Vitaliy.Kulikov@idt.com>");

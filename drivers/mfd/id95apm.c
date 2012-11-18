@@ -531,6 +531,13 @@ static int id95apm_init(struct id95apm *id95apm, int irq,
 		goto err;
 
 	/*
+	 * codec subdevice
+	 */
+	pdev = id95apm_add_pdev(id95apm, NULL, "id95apm-codec", 0);
+	if (!pdev)
+		goto err;
+
+	/*
 	 * pwrkey subdevice
 	 */
 	pdev = id95apm_add_pdev(id95apm, &pdata->pwrkey_init, "id95apm-pwrkey", 0);
