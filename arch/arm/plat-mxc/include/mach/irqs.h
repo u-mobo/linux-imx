@@ -51,6 +51,8 @@
 
 #ifdef CONFIG_MACH_MX31ADS_WM1133_EV1
 #define MXC_BOARD_IRQS  80
+#elif defined CONFIG_MACH_MX53_UMOBO
+#define MXC_BOARD_IRQS	64
 #elif defined CONFIG_MACH_MX35_3DS
 #define MXC_BOARD_IRQS	32
 #else
