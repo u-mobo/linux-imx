@@ -114,6 +114,7 @@ struct da9052_tsi_platform_data {
 	u16	tsi_ref_source;
 	u16	max_tsi_delay;
 	u16	max_tsi_skip_slot;
+	u16	flags;
 };
 
 

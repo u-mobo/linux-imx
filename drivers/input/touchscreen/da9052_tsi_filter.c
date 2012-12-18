@@ -299,6 +299,13 @@ s32 da9052_tsi_raw_proc_thread(void *ptr)
 
 #endif
 
+		if (priv->tsi_pdata->flags & DA9052_FLAG_INVERTX)
+			coord.x ^= DISPLAY_X_MAX;
+		if (priv->tsi_pdata->flags & DA9052_FLAG_INVERTY)
+			coord.y ^= DISPLAY_Y_MAX;
+		if (priv->tsi_pdata->flags & DA9052_FLAG_SWAPXY)
+			swap(coord.x, coord.y);
+
 		if (tsi_calib->calibrate_flag) {
 			calib_ok = da9052_tsi_get_calib_display_point(&coord);
 
