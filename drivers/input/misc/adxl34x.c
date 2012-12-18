@@ -237,18 +237,25 @@ static const struct adxl34x_platform_data adxl34x_default_init = {
 
 static void adxl34x_get_triple(struct adxl34x *ac, struct axis_triple *axis)
 {
+	struct adxl34x_platform_data *pdata = &ac->pdata;
 	short buf[3];
 
 	ac->bops->read_block(ac->dev, DATAX0, DATAZ1 - DATAX0 + 1, buf);
 
 	mutex_lock(&ac->mutex);
 	ac->saved.x = (s16) le16_to_cpu(buf[0]);
+	if (pdata->tap_axis_control & ADXL_TAP_X_INV)
+		ac->saved.x = -ac->saved.x;
 	axis->x = ac->saved.x;
 
 	ac->saved.y = (s16) le16_to_cpu(buf[1]);
+	if (pdata->tap_axis_control & ADXL_TAP_Y_INV)
+		ac->saved.y = -ac->saved.y;
 	axis->y = ac->saved.y;
 
 	ac->saved.z = (s16) le16_to_cpu(buf[2]);
+	if (pdata->tap_axis_control & ADXL_TAP_Z_INV)
+		ac->saved.z = -ac->saved.z;
 	axis->z = ac->saved.z;
 	mutex_unlock(&ac->mutex);
 }

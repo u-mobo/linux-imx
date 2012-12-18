@@ -35,6 +35,9 @@ struct adxl34x_platform_data {
 	 * opening of the second tap window.
 	 */
 
+#define ADXL_TAP_X_INV	(1 << 6)
+#define ADXL_TAP_Y_INV	(1 << 5)
+#define ADXL_TAP_Z_INV	(1 << 4)
 #define ADXL_SUPPRESS	(1 << 3)
 #define ADXL_TAP_X_EN	(1 << 2)
 #define ADXL_TAP_Y_EN	(1 << 1)
