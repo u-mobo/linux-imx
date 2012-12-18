@@ -378,8 +378,8 @@ static int __devinit mag3110_probe(struct i2c_client *client,
 
 	if (client->irq) {
 		/* set irq type to edge rising */
-		ret = request_irq(client->irq, mag3110_irq_handler,
-				  IRQF_TRIGGER_RISING, client->dev.driver->name, idev);
+		ret = request_threaded_irq(client->irq, NULL, mag3110_irq_handler,
+				  IRQF_TRIGGER_HIGH | IRQF_ONESHOT, client->dev.driver->name, idev);
 		if (ret < 0) {
 			dev_err(&client->dev, "failed to register irq %d!\n",
 				client->irq);
