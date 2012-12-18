@@ -43,6 +43,8 @@
 #define PCA953X_TYPE		0x1000
 #define PCA957X_TYPE		0x2000
 
+#define PCA_SUPPORTED_IRQ_TYPE	(IRQ_TYPE_EDGE_BOTH | IRQ_TYPE_LEVEL_HIGH | IRQ_TYPE_LEVEL_LOW)
+
 static const struct i2c_device_id pca953x_id[] = {
 	{ "pca9534", 8  | PCA953X_TYPE | PCA_INT, },
 	{ "pca9535", 16 | PCA953X_TYPE | PCA_INT, },
@@ -81,6 +83,8 @@ struct pca953x_chip {
 	uint16_t irq_stat;
 	uint16_t irq_trig_raise;
 	uint16_t irq_trig_fall;
+	uint16_t irq_trig_high;
+	uint16_t irq_trig_low;
 	int	 irq_base;
 #endif
 
@@ -341,6 +345,7 @@ static void pca953x_irq_bus_sync_unlock(unsigned int irq)
 
 	/* Look for any newly setup interrupt */
 	new_irqs = chip->irq_trig_fall | chip->irq_trig_raise;
+	new_irqs |= chip->irq_trig_high | chip->irq_trig_low;
 	new_irqs &= ~chip->reg_direction;
 
 	while (new_irqs) {
@@ -358,7 +363,7 @@ static int pca953x_irq_set_type(unsigned int irq, unsigned int type)
 	uint16_t level = irq - chip->irq_base;
 	uint16_t mask = 1 << level;
 
-	if (!(type & IRQ_TYPE_EDGE_BOTH)) {
+	if (!(type & PCA_SUPPORTED_IRQ_TYPE)) {
 		dev_err(&chip->client->dev, "irq %d: unsupported type %d\n",
 			irq, type);
 		return -EINVAL;
@@ -373,6 +378,16 @@ static int pca953x_irq_set_type(unsigned int irq, unsigned int type)
 		chip->irq_trig_raise |= mask;
 	else
 		chip->irq_trig_raise &= ~mask;
+
+	if (type & IRQ_TYPE_LEVEL_HIGH)
+		chip->irq_trig_high |= mask;
+	else
+		chip->irq_trig_high &= ~mask;
+
+	if (type & IRQ_TYPE_LEVEL_LOW)
+		chip->irq_trig_low |= mask;
+	else
+		chip->irq_trig_low &= ~mask;
 
 	return 0;
 }
@@ -410,16 +425,21 @@ static uint16_t pca953x_irq_pending(struct pca953x_chip *chip)
 	cur_stat &= chip->reg_direction;
 
 	old_stat = chip->irq_stat;
-	trigger = (cur_stat ^ old_stat) & chip->irq_mask;
+	trigger = (cur_stat ^ old_stat);
+	//trigger = (cur_stat ^ old_stat) & chip->irq_mask;
 
-	if (!trigger)
-		return 0;
+	//if (!trigger)
+	//	return 0;
 
 	chip->irq_stat = cur_stat;
 
 	pending = (old_stat & chip->irq_trig_fall) |
 		  (cur_stat & chip->irq_trig_raise);
 	pending &= trigger;
+
+	pending |= ((cur_stat & chip->irq_trig_high) |
+		  ((~cur_stat) & chip->irq_trig_low));
+	pending &= chip->irq_mask;
 
 	return pending;
 }
@@ -437,7 +457,7 @@ static irqreturn_t pca953x_irq_handler(int irq, void *devid)
 
 	do {
 		level = __ffs(pending);
-		generic_handle_irq(level + chip->irq_base);
+		handle_nested_irq(level + chip->irq_base);
 
 		pending &= ~(1 << level);
 	} while (pending);
@@ -481,8 +501,8 @@ static int pca953x_irq_setup(struct pca953x_chip *chip,
 			int irq = lvl + chip->irq_base;
 
 			set_irq_chip_data(irq, chip);
-			set_irq_chip_and_handler(irq, &pca953x_irq_chip,
-						 handle_simple_irq);
+			set_irq_chip(irq, &pca953x_irq_chip);
+			set_irq_nested_thread(irq, true);
 #ifdef CONFIG_ARM
 			set_irq_flags(irq, IRQF_VALID);
 #else
