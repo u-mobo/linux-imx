@@ -428,6 +428,7 @@ struct id95apm {
 	struct regulator_dev *rdev[ID95APM_NUM_REGULATORS];
 
 	struct power_supply *battery;
+	struct power_supply *charger;
 
 	struct rtc_device *rtc;
 

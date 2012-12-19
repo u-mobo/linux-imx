@@ -19,6 +19,20 @@
 #include <linux/mfd/id95apm.h>
 #include <linux/slab.h>
 
+#define UEVENT_UPDATE_INTERVALL_MS	1000
+
+static struct timer_list uevent_timer;
+
+static void uevent_timer_fn(long unsigned int data)
+{
+	struct id95apm *id95apm = (struct id95apm *)data;
+
+	power_supply_changed(id95apm->battery);
+	power_supply_changed(id95apm->charger);
+
+	mod_timer(&uevent_timer, jiffies + msecs_to_jiffies(UEVENT_UPDATE_INTERVALL_MS));
+}
+
 static int id95apm_battery_status(struct id95apm *id95apm)
 {
 	int state1;
@@ -96,6 +110,19 @@ static int id95apm_battery_voltage(struct id95apm *id95apm)
 	return ret * 1000;
 }
 
+static int id95apm_battery_temp(struct id95apm *id95apm)
+{
+	int ret;
+
+	/*
+	 * Calculate temperature in tenths of a degree Centigrade
+	 * t[ C] = VTEMP * 0.114822 - 278.2565 (refer to page 121)
+	 * t[dC] = VTEMP * 1.14822 - 2782.565
+	 */
+	ret = id95apm_reg16_read(id95apm, ID95APM_TSC_TEMP_RES);
+	return ((ret * 300999 - 729432719) >> 18);
+}
+
 static int id95apm_battery_get_property(struct power_supply *psy,
 					enum power_supply_property prop,
 					union power_supply_propval *val)
@@ -120,6 +147,22 @@ static int id95apm_battery_get_property(struct power_supply *psy,
 		val->intval = id95apm_battery_voltage(id95apm);
 		break;
 
+	case POWER_SUPPLY_PROP_CAPACITY:
+		val->intval = id95apm_battery_voltage(id95apm) / 42000;
+		break;
+
+	case POWER_SUPPLY_PROP_PRESENT:
+		val->intval = (id95apm_battery_status(id95apm) != POWER_SUPPLY_STATUS_UNKNOWN);
+		break;
+
+	case POWER_SUPPLY_PROP_TECHNOLOGY:
+		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
+		break;
+
+	case POWER_SUPPLY_PROP_TEMP:
+		val->intval = id95apm_battery_temp(id95apm);
+		break;
+
 	default:
 		ret = -EINVAL;
 	}
@@ -132,6 +175,42 @@ static enum power_supply_property id95apm_battery_props[] = {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_CAPACITY,
+	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_TECHNOLOGY,
+	POWER_SUPPLY_PROP_TEMP,
+};
+
+static int id95apm_charger_status(struct id95apm *id95apm)
+{
+	int state1;
+
+	state1 = id95apm_reg_read(id95apm, ID95APM_CHGR_OP_STAT);
+
+	return state1 & ID95APM_CHGR_OP_STAT_ADAPTER;
+}
+
+static int id95apm_charger_get_property(struct power_supply *psy,
+					enum power_supply_property prop,
+					union power_supply_propval *val)
+{
+	struct id95apm *id95apm = dev_get_drvdata(psy->dev->parent);
+	int ret = 0;
+
+	switch (prop) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		val->intval = id95apm_charger_status(id95apm);
+		break;
+
+	default:
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
+static enum power_supply_property id95apm_charger_props[] = {
+	POWER_SUPPLY_PROP_ONLINE,
 };
 
 static void charger_handler(struct id95apm *id95apm, int irq, void *data)
@@ -166,6 +245,7 @@ static int id95apm_battery_probe(struct platform_device *pdev)
 {
 	struct id95apm *id95apm;
 	struct power_supply *battery;
+	struct power_supply *charger;
 	int ret;
 
 	/* Already set by core driver */
@@ -186,6 +266,24 @@ static int id95apm_battery_probe(struct platform_device *pdev)
 	ret = power_supply_register(&pdev->dev, battery);
 	if (ret) {
 		dev_err(id95apm->dev, "failed to register battery\n");
+		goto fail;
+	}
+
+	charger = kzalloc(sizeof(*charger), GFP_KERNEL);
+	if (!charger) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	id95apm->charger = charger;
+
+	charger->name = "id95apm-charger";
+	charger->type = POWER_SUPPLY_TYPE_MAINS;
+	charger->properties = id95apm_charger_props;
+	charger->num_properties = ARRAY_SIZE(id95apm_charger_props);
+	charger->get_property = id95apm_charger_get_property;
+	ret = power_supply_register(&pdev->dev, charger);
+	if (ret) {
+		dev_err(id95apm->dev, "failed to register charger\n");
 		goto fail;
 	}
 
@@ -212,6 +310,9 @@ static int id95apm_battery_probe(struct platform_device *pdev)
 	 */
 	id95apm_reg_write(id95apm, ID95APM_CHGR_IRQ_EN, ID95APM_CHGR_IRQ_MASK);
 
+	setup_timer(&uevent_timer, uevent_timer_fn, (long unsigned int)id95apm);
+	mod_timer(&uevent_timer, jiffies + msecs_to_jiffies(UEVENT_UPDATE_INTERVALL_MS));
+
 	return 0;
 
 fail:
@@ -227,6 +328,8 @@ static int id95apm_battery_remove(struct platform_device *pdev)
 	id95apm_free_irq(id95apm, ID95APM_IRQ_CHRG);
 	power_supply_unregister(id95apm->battery);
 	kfree(id95apm->battery);
+
+	del_timer(&uevent_timer);
 
 	return 0;
 }
