@@ -113,7 +113,7 @@ static int id95apm_backlight_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	data->id95apm = id95apm;
-	data->current_brightness = 0;
+	data->current_brightness = 32;
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,31))
 	memset(&props, 0, sizeof(struct backlight_properties));
@@ -131,7 +131,7 @@ static int id95apm_backlight_probe(struct platform_device *pdev)
 	}
 
 	bl->props.max_brightness = 48;
-	bl->props.brightness = 0;
+	bl->props.brightness = 32;
 
 	platform_set_drvdata(pdev, bl);
 
