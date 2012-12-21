@@ -45,6 +45,8 @@
 #define POLL_INTERVAL		100
 #define INT_TIMEOUT   1000
 
+#define MAG3110_DEFAULT_TEMP_CALIBRATION	20
+
 /* register enum for mag3110 registers */
 enum {
 	MAG3110_DR_STATUS = 0x00,
@@ -55,7 +57,7 @@ enum {
 	MAG3110_OUT_Z_MSB,
 	MAG3110_OUT_Z_LSB,
 	MAG3110_WHO_AM_I,
-
+	MAG3110_SYSMOD,
 	MAG3110_OFF_X_MSB,
 	MAG3110_OFF_X_LSB,
 	MAG3110_OFF_Y_MSB,
@@ -77,6 +79,7 @@ struct mag3110_data {
 	bool data_ready;
 	bool stop_polling;
 	u8 ctl_reg1;
+	s8 tempcal;
 };
 
 static struct mag3110_data *mag3110_pdata;
@@ -177,14 +180,19 @@ static void report_abs(void)
 {
 	struct input_dev *idev;
 	short x, y, z;
+	s8 t;
 
 	if (mag3110_read_data(&x, &y, &z) != 0)
 		return;
+
+	t = mag3110_read_reg(mag3110_pdata->client, MAG3110_DIE_TEMP);
+	t += mag3110_pdata->tempcal;
 
 	idev = mag3110_pdata->poll_dev->input;
 	input_report_abs(idev, ABS_X, x);
 	input_report_abs(idev, ABS_Y, y);
 	input_report_abs(idev, ABS_Z, z);
+	input_report_abs(idev, ABS_MISC, t);
 	input_sync(idev);
 }
 
@@ -251,6 +259,30 @@ static ssize_t mag3110_enable_store(struct device *dev,
 
 static DEVICE_ATTR(enable, S_IWUSR | S_IRUGO,
 		   mag3110_enable_show, mag3110_enable_store);
+
+static ssize_t mag3110_tempcal_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", mag3110_pdata->tempcal);
+}
+
+static ssize_t mag3110_tempcal_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	unsigned long tempcal;
+
+	if (strict_strtoul(buf, 10, &tempcal))
+		return -EINVAL;
+	if ((tempcal <= 0) || (tempcal > 64))
+		return -EINVAL;
+	mag3110_pdata->tempcal = tempcal;
+
+	return count;
+}
+
+static DEVICE_ATTR(tempcal, S_IWUSR | S_IRUGO,
+		   mag3110_tempcal_show, mag3110_tempcal_store);
 
 static ssize_t mag3110_dr_mode_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
@@ -346,6 +378,7 @@ static int __devinit mag3110_probe(struct i2c_client *client,
 
 	data->hwmon_dev = hwmon_device_register(&client->dev);
 	data->stop_polling = false;
+	data->tempcal = MAG3110_DEFAULT_TEMP_CALIBRATION;
 	if (IS_ERR(data->hwmon_dev)) {
 		dev_err(&client->dev, "hwmon register failed!\n");
 		ret = PTR_ERR(data->hwmon_dev);
@@ -370,6 +403,7 @@ static int __devinit mag3110_probe(struct i2c_client *client,
 	input_set_abs_params(idev, ABS_X, -15000, 15000, 0, 0);
 	input_set_abs_params(idev, ABS_Y, -15000, 15000, 0, 0);
 	input_set_abs_params(idev, ABS_Z, -15000, 15000, 0, 0);
+	input_set_abs_params(idev, ABS_MISC, -40, 125, 0, 0);
 	ret = input_register_polled_device(data->poll_dev);
 	if (ret) {
 		dev_err(&client->dev, "register poll device failed!\n");
