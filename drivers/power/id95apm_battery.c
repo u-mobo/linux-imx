@@ -102,6 +102,9 @@ static int id95apm_battery_voltage(struct id95apm *id95apm)
 {
 	int ret;
 
+	if (id95apm_battery_status(id95apm) == POWER_SUPPLY_STATUS_UNKNOWN)
+		return 0;
+
 	/* Calculate voltage in mV */
 	ret = id95apm_reg16_read(id95apm, ID95APM_TSC_BAT_RES);
 	ret = (ret * 4200) / 4096;
