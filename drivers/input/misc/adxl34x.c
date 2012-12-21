@@ -98,6 +98,7 @@
 /* BW_RATE Bits */
 #define LOW_POWER	(1 << 4)
 #define RATE(x)		((x) & 0xF)
+#define RATE2MS(x)	(20480 >> RATE(x))
 
 /* POWER_CTL Bits */
 #define PCTL_LINK	(1 << 5)
@@ -205,7 +206,7 @@ struct adxl34x {
 	int irq;
 	unsigned model;
 	unsigned int_mask;
-
+	struct delayed_work polling_work;
 	const struct adxl34x_bus_ops *bops;
 };
 
@@ -403,6 +404,14 @@ static irqreturn_t adxl34x_irq(int irq, void *handle)
 	input_sync(ac->input);
 
 	return IRQ_HANDLED;
+}
+
+static void adxl34x_polling_fn(struct work_struct *work)
+{
+	struct adxl34x *ac = container_of(work, struct adxl34x, polling_work.work);
+
+	adxl34x_irq(0, (void*)ac);
+	schedule_delayed_work(&ac->polling_work, msecs_to_jiffies(RATE2MS(ac->pdata.data_rate)));
 }
 
 static void __adxl34x_disable(struct adxl34x *ac)
@@ -706,9 +715,7 @@ struct adxl34x *adxl34x_probe(struct device *dev, int irq,
 	unsigned char revid;
 
 	if (!irq) {
-		dev_err(dev, "no IRQ?\n");
-		err = -ENODEV;
-		goto err_out;
+		dev_dbg(dev, "no IRQ, polling!\n");
 	}
 
 	ac = kzalloc(sizeof(*ac), GFP_KERNEL);
@@ -817,12 +824,17 @@ struct adxl34x *adxl34x_probe(struct device *dev, int irq,
 
 	ac->bops->write(dev, POWER_CTL, 0);
 
-	err = request_threaded_irq(ac->irq, NULL, adxl34x_irq,
-				   IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
-				   dev_name(dev), ac);
-	if (err) {
-		dev_err(dev, "irq %d busy?\n", ac->irq);
-		goto err_free_mem;
+	if (ac->irq) {
+		err = request_threaded_irq(ac->irq, NULL, adxl34x_irq,
+					   IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
+					   dev_name(dev), ac);
+		if (err) {
+			dev_err(dev, "irq %d busy?\n", ac->irq);
+			goto err_free_mem;
+		}
+	} else {
+		INIT_DELAYED_WORK(&ac->polling_work, adxl34x_polling_fn);
+		schedule_delayed_work(&ac->polling_work, msecs_to_jiffies(RATE2MS(pdata->data_rate)));
 	}
 
 	err = sysfs_create_group(&dev->kobj, &adxl34x_attr_group);
@@ -895,7 +907,10 @@ struct adxl34x *adxl34x_probe(struct device *dev, int irq,
  err_remove_attr:
 	sysfs_remove_group(&dev->kobj, &adxl34x_attr_group);
  err_free_irq:
-	free_irq(ac->irq, ac);
+	if (ac->irq)
+		free_irq(ac->irq, ac);
+	else
+		cancel_delayed_work_sync(&ac->polling_work);
  err_free_mem:
 	input_free_device(input_dev);
 	kfree(ac);
@@ -907,7 +922,10 @@ EXPORT_SYMBOL_GPL(adxl34x_probe);
 int adxl34x_remove(struct adxl34x *ac)
 {
 	sysfs_remove_group(&ac->dev->kobj, &adxl34x_attr_group);
-	free_irq(ac->irq, ac);
+	if (ac->irq)
+		free_irq(ac->irq, ac);
+	else
+		cancel_delayed_work_sync(&ac->polling_work);
 	input_unregister_device(ac->input);
 	dev_dbg(ac->dev, "unregistered accelerometer\n");
 	kfree(ac);
