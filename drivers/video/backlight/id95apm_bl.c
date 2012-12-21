@@ -101,6 +101,9 @@ static int id95apm_backlight_probe(struct platform_device *pdev)
 	struct id95apm *id95apm = dev_get_drvdata(pdev->dev.parent);
 	struct id95apm_backlight_data *data;
 	struct backlight_device *bl;
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,31))
+	struct backlight_properties props;
+#endif
 
 	/* Enable LED boost converter */
 	id95apm_clrset_bits(id95apm, ID95APM_GLOB_DCDC_ENABLE, 0, 0x10);
@@ -112,8 +115,15 @@ static int id95apm_backlight_probe(struct platform_device *pdev)
 	data->id95apm = id95apm;
 	data->current_brightness = 0;
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,31))
+	memset(&props, 0, sizeof(struct backlight_properties));
+	props.max_brightness = 48;
+	bl = backlight_device_register("id95apm", &pdev->dev,
+				       data, &id95apm_backlight_ops, &props);
+#else
 	bl = backlight_device_register("id95apm", &pdev->dev,
 				       data, &id95apm_backlight_ops);
+#endif
 	if (IS_ERR(bl)) {
 		dev_err(&pdev->dev, "failed to register backlight\n");
 		kfree(data);
