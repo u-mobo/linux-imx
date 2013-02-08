@@ -2551,6 +2551,30 @@ static unsigned long _clk_ssi1_get_rate(struct clk *clk)
 
 	return clk_get_rate(clk->parent) / (prediv * podf);
 }
+
+static int _clk_ssi1_set_rate(struct clk *clk, unsigned long rate)
+{
+	u32 reg, div, pre, post;
+	u32 parent_rate = clk_get_rate(clk->parent);
+
+	div = parent_rate / rate;
+	if (div == 0)
+		div++;
+	if (((parent_rate / div) != rate) || div > 512)
+		return -EINVAL;
+
+	__calc_pre_post_dividers(div, &pre, &post);
+
+	reg = __raw_readl(MXC_CCM_CS1CDR);
+	reg &= ~(MXC_CCM_CS1CDR_SSI1_CLK_PRED_MASK |
+		 MXC_CCM_CS1CDR_SSI1_CLK_PODF_MASK);
+	reg |= (post - 1) << MXC_CCM_CS1CDR_SSI1_CLK_PODF_OFFSET;
+	reg |= (pre - 1) << MXC_CCM_CS1CDR_SSI1_CLK_PRED_OFFSET;
+	__raw_writel(reg, MXC_CCM_CS1CDR);
+
+	return 0;
+}
+
 static int _clk_ssi1_set_parent(struct clk *clk, struct clk *parent)
 {
 	u32 reg, mux;
@@ -2571,6 +2595,7 @@ static struct clk ssi1_clk[] = {
 	 .set_parent = _clk_ssi1_set_parent,
 	 .secondary = &ssi1_clk[1],
 	 .get_rate = _clk_ssi1_get_rate,
+	 .set_rate = _clk_ssi1_set_rate,
 	 .enable_reg = MXC_CCM_CCGR3,
 	 .enable_shift = MXC_CCM_CCGRx_CG9_OFFSET,
 	 .enable = _clk_enable,
@@ -2611,6 +2636,29 @@ static unsigned long _clk_ssi2_get_rate(struct clk *clk)
 	return clk_get_rate(clk->parent) / (prediv * podf);
 }
 
+static int _clk_ssi2_set_rate(struct clk *clk, unsigned long rate)
+{
+	u32 reg, div, pre, post;
+	u32 parent_rate = clk_get_rate(clk->parent);
+
+	div = parent_rate / rate;
+	if (div == 0)
+		div++;
+	if (((parent_rate / div) != rate) || div > 512)
+		return -EINVAL;
+
+	__calc_pre_post_dividers(div, &pre, &post);
+
+	reg = __raw_readl(MXC_CCM_CS2CDR);
+	reg &= ~(MXC_CCM_CS2CDR_SSI2_CLK_PRED_MASK |
+		 MXC_CCM_CS2CDR_SSI2_CLK_PODF_MASK);
+	reg |= (post - 1) << MXC_CCM_CS2CDR_SSI2_CLK_PODF_OFFSET;
+	reg |= (pre - 1) << MXC_CCM_CS2CDR_SSI2_CLK_PRED_OFFSET;
+	__raw_writel(reg, MXC_CCM_CS2CDR);
+
+	return 0;
+}
+
 static int _clk_ssi2_set_parent(struct clk *clk, struct clk *parent)
 {
 	u32 reg, mux;
@@ -2631,6 +2679,7 @@ static struct clk ssi2_clk[] = {
 	 .set_parent = _clk_ssi2_set_parent,
 	 .secondary = &ssi2_clk[1],
 	 .get_rate = _clk_ssi2_get_rate,
+	 .set_rate = _clk_ssi2_set_rate,
 	 .enable_reg = MXC_CCM_CCGR3,
 	 .enable_shift = MXC_CCM_CCGRx_CG11_OFFSET,
 	 .enable = _clk_enable,

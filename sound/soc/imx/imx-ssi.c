@@ -130,9 +130,10 @@ static int imx_ssi_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
 
 	switch (clk_id) {
 	case IMX_SSP_SYS_CLK:
-		if (dir == SND_SOC_CLOCK_OUT)
+		if (dir == SND_SOC_CLOCK_OUT) {
 			scr |= SSI_SCR_SYS_CLK_EN;
-		else
+			clk_set_rate(priv->ssi_clk, freq);
+		} else
 			scr &= ~SSI_SCR_SYS_CLK_EN;
 		break;
 	default:
