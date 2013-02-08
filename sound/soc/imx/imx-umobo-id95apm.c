@@ -1,15 +1,12 @@
 /*
- * imx-3stack-id95apm.c  --  i.MX 3Stack Driver for IDT P95020 Codec
+ * imx-umobo-id95apm.c  --  i.MX U-MoBo Driver for IDT P95020 Codec
  *
- * Copyright (C) 2008-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+ * Copyright (C) 2012-2013 U-MoBo. All Rights Reserved.
  *
  *  This program is free software; you can redistribute  it and/or modify it
  *  under  the terms of  the GNU General  Public License as published by the
  *  Free Software Foundation;  either version 2 of the  License, or (at your
  *  option) any later version.
- *
- *  Revision history
- *    21th Oct 2008   Initial version.
  *
  */
 #define DEBUG
@@ -65,16 +62,10 @@ struct asrc_esai {
 static struct asrc_esai asrc_ssi_data;
 #endif
 
-/* ID95APM SSI BCLK and LRC slave */
-#define ID95APM_SSI_MASTER	0
-
-#define ID95APM_SYSCLK		0x00
-#define ID95APM_LRCLK		0x01
-
 extern struct snd_soc_dai id95apm_dai;
 extern struct snd_soc_codec_device id95apm_soc_codec_dev;
 
-struct imx_3stack_priv {
+struct imx_umobo_priv {
 	int sysclk;
 	int hw;
 	struct platform_device *pdev;
@@ -117,19 +108,48 @@ static int get_format_width(struct snd_pcm_hw_params *params)
 }
 #endif
 
-static struct imx_3stack_priv card_priv;
+static struct imx_umobo_priv card_priv;
 
-static int imx_3stack_audio_hw_params(struct snd_pcm_substream *substream,
+/*
+ * simplyfied version of the clock settings assuming:
+ * - no changes to ssi's sys clock
+ * - DIV2 = 0
+ * - PSR (prescaler range) = 0
+ */
+static inline unsigned int get_prescaler_modulus(unsigned long sysclk_rate, unsigned int rate, short bits_per_sample, unsigned int channels)
+{
+	unsigned int bitclk, pm;
+	unsigned int dummy, real_rate;
+
+	bitclk = bits_per_sample * channels * rate;
+
+	/* rounded divisions */
+	pm = (sysclk_rate + bitclk) / (bitclk << 1);
+	if (pm == 0)
+		pm = 1;	/* minimum allowed */
+
+	dummy = bits_per_sample * channels * pm;
+	real_rate = (sysclk_rate + dummy) / (dummy << 1);
+
+	if (rate != real_rate)
+		pr_warning("imx-id95apm: requested %dbits(%s)@%dHz, provided %dHz\n", bits_per_sample, (channels == 1 ? "MONO" : "STEREO"), rate, real_rate);
+
+	return --pm;
+}
+
+
+static int imx_umobo_audio_hw_params(struct snd_pcm_substream *substream,
 				      struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai_link *machine = rtd->dai;
 	struct snd_soc_dai *cpu_dai = machine->cpu_dai;
 	struct snd_soc_dai *codec_dai = machine->codec_dai;
-	struct imx_3stack_priv *priv = &card_priv;
+	struct imx_umobo_priv *priv = &card_priv;
 	unsigned int rate = params_rate(params);
 	struct imx_ssi *ssi_mode = (struct imx_ssi *)cpu_dai->private_data;
 	int ret = 0;
+	unsigned int prescaler_modulus;
 
 	unsigned int channels = params_channels(params);
 	u32 dai_format;
@@ -148,7 +168,7 @@ static int imx_3stack_audio_hw_params(struct snd_pcm_substream *substream,
 		    substream->runtime->private_data;
 		struct asrc_config config = {0};
 		struct mxc_audio_platform_data *plat;
-		struct imx_3stack_priv *priv = &card_priv;
+		struct imx_umobo_priv *priv = &card_priv;
 		int retVal = 0;
 		retVal = asrc_req_pair(channel, &asrc_ssi_data.asrc_index);
 		if (retVal < 0) {
@@ -178,16 +198,18 @@ static int imx_3stack_audio_hw_params(struct snd_pcm_substream *substream,
 	}
 #endif
 
-	snd_soc_dai_set_sysclk(codec_dai, ID95APM_SYSCLK, priv->sysclk, 0);
-	snd_soc_dai_set_sysclk(codec_dai, ID95APM_LRCLK, rate, 0);
+	/*
+	 * The word length is fixed to 32 in I2S Master mode and the WL bits
+	 * determine the number of bits that will contain valid data (out of
+	 * the 32 transmitted/received bits in each channel).
+	 * Ref i.MX53 Reference Manual, rev 2.1 06/2012,
+	 * pag 4467, end of paragraph 73.7.1.4
+	 */
+	prescaler_modulus = get_prescaler_modulus(priv->sysclk, rate, 32, channels);
 
-#if ID95APM_SSI_MASTER
-	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-	    SND_SOC_DAIFMT_CBM_CFM;
-#else
+	/* ID95APM BCLK and LRC slave */
 	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 	    SND_SOC_DAIFMT_CBS_CFS;
-#endif
 
 	ssi_mode->sync_mode = 1;
 	if (channels == 1)
@@ -211,13 +233,19 @@ static int imx_3stack_audio_hw_params(struct snd_pcm_substream *substream,
 	if (ret < 0)
 		return ret;
 
-	/* set the SSI system clock as input (unused) */
-	snd_soc_dai_set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0, SND_SOC_CLOCK_IN);
+	/* set the SSI system clock as output */
+	snd_soc_dai_set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, priv->sysclk, SND_SOC_CLOCK_OUT);
+	snd_soc_dai_set_clkdiv(cpu_dai, IMX_SSI_RX_DIV_2, 0);
+	snd_soc_dai_set_clkdiv(cpu_dai, IMX_SSI_TX_DIV_2, 0);
+	snd_soc_dai_set_clkdiv(cpu_dai, IMX_SSI_RX_DIV_PM, prescaler_modulus);
+	snd_soc_dai_set_clkdiv(cpu_dai, IMX_SSI_TX_DIV_PM, prescaler_modulus);
+	snd_soc_dai_set_clkdiv(cpu_dai, IMX_SSI_RX_DIV_PSR, 0);
+	snd_soc_dai_set_clkdiv(cpu_dai, IMX_SSI_TX_DIV_PSR, 0);
 
 	return 0;
 }
 
-static int imx_3stack_startup(struct snd_pcm_substream *substream)
+static int imx_umobo_startup(struct snd_pcm_substream *substream)
 {
 #if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -240,9 +268,9 @@ static int imx_3stack_startup(struct snd_pcm_substream *substream)
 	return 0;
 }
 
-static void imx_3stack_shutdown(struct snd_pcm_substream *substream)
+static void imx_umobo_shutdown(struct snd_pcm_substream *substream)
 {
-	struct imx_3stack_priv *priv = &card_priv;
+	struct imx_umobo_priv *priv = &card_priv;
 
 #if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
@@ -264,15 +292,15 @@ static void imx_3stack_shutdown(struct snd_pcm_substream *substream)
 }
 
 /*
- * imx_3stack ID95APM audio DAI opserations.
+ * imx_umobo ID95APM audio DAI opserations.
  */
-static struct snd_soc_ops imx_3stack_ops = {
-	.startup = imx_3stack_startup,
-	.shutdown = imx_3stack_shutdown,
-	.hw_params = imx_3stack_audio_hw_params,
+static struct snd_soc_ops imx_umobo_ops = {
+	.startup = imx_umobo_startup,
+	.shutdown = imx_umobo_shutdown,
+	.hw_params = imx_umobo_audio_hw_params,
 };
 
-static void imx_3stack_init_dam(int ssi_port, int dai_port)
+static void imx_umobo_init_dam(int ssi_port, int dai_port)
 {
 	unsigned int ssi_ptcr = 0;
 	unsigned int dai_ptcr = 0;
@@ -290,19 +318,6 @@ static void imx_3stack_init_dam(int ssi_port, int dai_port)
 	ssi_ptcr |= AUDMUX_PTCR_SYN;
 	dai_ptcr |= AUDMUX_PTCR_SYN;
 
-#if ID95APM_SSI_MASTER
-	/* set Rx sources ssi_port <--> dai_port */
-	ssi_pdcr |= AUDMUX_PDCR_RXDSEL(dai_port);
-	dai_pdcr |= AUDMUX_PDCR_RXDSEL(ssi_port);
-
-	/* set Tx frame direction and source  dai_port--> ssi_port output */
-	ssi_ptcr |= AUDMUX_PTCR_TFSDIR;
-	ssi_ptcr |= AUDMUX_PTCR_TFSSEL(AUDMUX_FROM_TXFS, dai_port);
-
-	/* set Tx Clock direction and source dai_port--> ssi_port output */
-	ssi_ptcr |= AUDMUX_PTCR_TCLKDIR;
-	ssi_ptcr |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, dai_port);
-#else
 	/* set Rx sources ssi_port <--> dai_port */
 	ssi_pdcr |= AUDMUX_PDCR_RXDSEL(dai_port);
 	dai_pdcr |= AUDMUX_PDCR_RXDSEL(ssi_port);
@@ -314,7 +329,6 @@ static void imx_3stack_init_dam(int ssi_port, int dai_port)
 	/* set Tx Clock direction and source ssi_port--> dai_port output */
 	dai_ptcr |= AUDMUX_PTCR_TCLKDIR;
 	dai_ptcr |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, ssi_port);
-#endif
 
 	__raw_writel(ssi_ptcr, DAM_PTCR(ssi_port));
 	__raw_writel(dai_ptcr, DAM_PTCR(dai_port));
@@ -322,7 +336,7 @@ static void imx_3stack_init_dam(int ssi_port, int dai_port)
 	__raw_writel(dai_pdcr, DAM_PDCR(dai_port));
 }
 
-/* imx_3stack machine connections to the codec pins */
+/* imx_umobo machine connections to the codec pins */
 static const struct snd_soc_dapm_route audio_map[] = {
 	{ "Speaker Jack", NULL, "SPKRL" },
 	{ "Speaker Jack", NULL, "SPKRR" },
@@ -346,7 +360,7 @@ static int id95apm_line_in_func;
 
 static void headphone_detect_handler(struct work_struct *work)
 {
-	struct imx_3stack_priv *priv = &card_priv;
+	struct imx_umobo_priv *priv = &card_priv;
 	struct platform_device *pdev = priv->pdev;
 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
 	int hp_status;
@@ -387,7 +401,7 @@ static irqreturn_t imx_headphone_detect_handler(int irq, void *data)
 
 static ssize_t show_headphone(struct device_driver *dev, char *buf)
 {
-	struct imx_3stack_priv *priv = &card_priv;
+	struct imx_umobo_priv *priv = &card_priv;
 	struct platform_device *pdev = priv->pdev;
 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
 	u16 hp_status;
@@ -495,8 +509,8 @@ static int id95apm_set_line_in(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
-/* imx_3stack card dapm widgets */
-static const struct snd_soc_dapm_widget imx_3stack_dapm_widgets[] = {
+/* imx_umobo card dapm widgets */
+static const struct snd_soc_dapm_widget imx_umobo_dapm_widgets[] = {
 	SND_SOC_DAPM_SPK("Speaker Jack", NULL),
 	SND_SOC_DAPM_LINE("Line Out Jack", NULL),
 	SND_SOC_DAPM_HP("HP Jack", NULL),
@@ -520,7 +534,7 @@ static const char *asrc_function[] = {
 	"disable", "8KHz", "11.025KHz", "16KHz", "22.05KHz", "32KHz", "44.1KHz", "48KHz", "88.2kHz", "96KHz" };
 
 static const struct soc_enum asrc_enum[] = {
-	SOC_ENUM_SINGLE_EXT(5, asrc_function),
+	SOC_ENUM_SINGLE_EXT(10, asrc_function),
 };
 
 static int asrc_get_rate(struct snd_kcontrol *kcontrol,
@@ -548,7 +562,7 @@ static const struct snd_kcontrol_new asrc_controls[] = {
 };
 #endif
 
-static int imx_3stack_id95apm_init(struct snd_soc_codec *codec)
+static int imx_umobo_id95apm_init(struct snd_soc_codec *codec)
 {
 	int i, ret;
 
@@ -562,7 +576,7 @@ static int imx_3stack_id95apm_init(struct snd_soc_codec *codec)
 	asrc_ssi_data.output_sample_rate = id95apm_rates[asrc_func];
 #endif
 
-	/* Add imx_3stack specific controls */
+	/* Add imx_umobo specific controls */
 	for (i = 0; i < ARRAY_SIZE(id95apm_machine_controls); i++) {
 		ret = snd_ctl_add(codec->card,
 				  snd_soc_cnew(&id95apm_machine_controls[i],
@@ -571,11 +585,11 @@ static int imx_3stack_id95apm_init(struct snd_soc_codec *codec)
 			return ret;
 	}
 
-	/* Add imx_3stack specific widgets */
-	snd_soc_dapm_new_controls(codec, imx_3stack_dapm_widgets,
-				  ARRAY_SIZE(imx_3stack_dapm_widgets));
+	/* Add imx_umobo specific widgets */
+	snd_soc_dapm_new_controls(codec, imx_umobo_dapm_widgets,
+				  ARRAY_SIZE(imx_umobo_dapm_widgets));
 
-	/* Set up imx_3stack specific audio path audio_map */
+	/* Set up imx_umobo specific audio path audio_map */
 	snd_soc_dapm_add_routes(codec, audio_map, ARRAY_SIZE(audio_map));
 
 	snd_soc_dapm_disable_pin(codec, "Line In Jack");
@@ -585,18 +599,18 @@ static int imx_3stack_id95apm_init(struct snd_soc_codec *codec)
 	return 0;
 }
 
-/* imx_3stack digital audio interface glue - connects codec <--> CPU */
-static struct snd_soc_dai_link imx_3stack_dai = {
+/* imx_umobo digital audio interface glue - connects codec <--> CPU */
+static struct snd_soc_dai_link imx_umobo_dai = {
 	.name = "IP95APM",
 	.stream_name = "ID95APM",
 	.codec_dai = &id95apm_dai,
-	.init = imx_3stack_id95apm_init,
-	.ops = &imx_3stack_ops,
+	.init = imx_umobo_id95apm_init,
+	.ops = &imx_umobo_ops,
 };
 
-static int imx_3stack_card_remove(struct platform_device *pdev)
+static int imx_umobo_card_remove(struct platform_device *pdev)
 {
-	struct imx_3stack_priv *priv = &card_priv;
+	struct imx_umobo_priv *priv = &card_priv;
 	struct mxc_audio_platform_data *plat;
 	if (priv->pdev) {
 		plat = priv->pdev->dev.platform_data;
@@ -607,23 +621,23 @@ static int imx_3stack_card_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static struct snd_soc_card snd_soc_card_imx_3stack = {
-	.name = "imx-3stack",
+static struct snd_soc_card snd_soc_card_imx_umobo = {
+	.name = "imx-id95apm",
 	.platform = &imx_soc_platform,
-	.dai_link = &imx_3stack_dai,
+	.dai_link = &imx_umobo_dai,
 	.num_links = 1,
-	.remove = imx_3stack_card_remove,
+	.remove = imx_umobo_card_remove,
 };
 
-static struct snd_soc_device imx_3stack_snd_devdata = {
-	.card = &snd_soc_card_imx_3stack,
+static struct snd_soc_device imx_umobo_snd_devdata = {
+	.card = &snd_soc_card_imx_umobo,
 	.codec_dev = &id95apm_soc_codec_dev,
 };
 
-static int __devinit imx_3stack_id95apm_probe(struct platform_device *pdev)
+static int __devinit imx_umobo_id95apm_probe(struct platform_device *pdev)
 {
 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
-	struct imx_3stack_priv *priv = &card_priv;
+	struct imx_umobo_priv *priv = &card_priv;
 	struct snd_soc_dai *id95apm_cpu_dai = 0;
 
 	int ret = 0;
@@ -631,7 +645,7 @@ static int __devinit imx_3stack_id95apm_probe(struct platform_device *pdev)
 	priv->pdev = pdev;
 
 	gpio_activate_audio_ports();
-	imx_3stack_init_dam(plat->src_port, plat->ext_port);
+	imx_umobo_init_dam(plat->src_port, plat->ext_port);
 
 	if (plat->src_port == 2)
 		id95apm_cpu_dai = imx_ssi_dai[2];
@@ -641,10 +655,10 @@ static int __devinit imx_3stack_id95apm_probe(struct platform_device *pdev)
 		id95apm_cpu_dai = imx_ssi_dai[4];
 
 
-	imx_3stack_dai.cpu_dai = id95apm_cpu_dai;
+	imx_umobo_dai.cpu_dai = id95apm_cpu_dai;
 
 	/* get mxc_audio_platform_data for pcm */
-	imx_3stack_dai.cpu_dai->dev = &pdev->dev;
+	imx_umobo_dai.cpu_dai->dev = &pdev->dev;
 
 	ret = driver_create_file(pdev->dev.driver, &driver_attr_headphone);
 	if (ret < 0) {
@@ -657,10 +671,6 @@ static int __devinit imx_3stack_id95apm_probe(struct platform_device *pdev)
 		goto err_plat_init;
 
 	priv->sysclk = plat->sysclk;
-
-	/* The ID95APM has an internal reset that is deasserted 8 SYS_MCLK
-	   cycles after all power rails have been brought up. After this time
-	   communication can start */
 
 	if (plat->hp_status) {
 		if (plat->hp_status())
@@ -692,10 +702,10 @@ sysfs_err:
 	return ret;
 }
 
-static int imx_3stack_id95apm_remove(struct platform_device *pdev)
+static int imx_umobo_id95apm_remove(struct platform_device *pdev)
 {
 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
-	struct imx_3stack_priv *priv = &card_priv;
+	struct imx_umobo_priv *priv = &card_priv;
 
 	free_irq(plat->hp_irq, priv);
 
@@ -707,47 +717,47 @@ static int imx_3stack_id95apm_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static struct platform_driver imx_3stack_id95apm_audio_driver = {
-	.probe = imx_3stack_id95apm_probe,
-	.remove = imx_3stack_id95apm_remove,
+static struct platform_driver imx_umobo_id95apm_audio_driver = {
+	.probe = imx_umobo_id95apm_probe,
+	.remove = imx_umobo_id95apm_remove,
 	.driver = {
-		   .name = "imx-3stack-id95apm",
+		   .name = "imx-umobo-id95apm",
 		   },
 };
 
-static struct platform_device *imx_3stack_snd_device;
+static struct platform_device *imx_umobo_snd_device;
 
-static int __init imx_3stack_init(void)
+static int __init imx_umobo_init(void)
 {
 	int ret;
 
-	ret = platform_driver_register(&imx_3stack_id95apm_audio_driver);
+	ret = platform_driver_register(&imx_umobo_id95apm_audio_driver);
 	if (ret)
 		return -ENOMEM;
 
-	imx_3stack_snd_device = platform_device_alloc("soc-audio", 4);
-	if (!imx_3stack_snd_device)
+	imx_umobo_snd_device = platform_device_alloc("soc-audio", 4);
+	if (!imx_umobo_snd_device)
 		return -ENOMEM;
 
-	platform_set_drvdata(imx_3stack_snd_device, &imx_3stack_snd_devdata);
-	imx_3stack_snd_devdata.dev = &imx_3stack_snd_device->dev;
-	ret = platform_device_add(imx_3stack_snd_device);
+	platform_set_drvdata(imx_umobo_snd_device, &imx_umobo_snd_devdata);
+	imx_umobo_snd_devdata.dev = &imx_umobo_snd_device->dev;
+	ret = platform_device_add(imx_umobo_snd_device);
 
 	if (ret)
-		platform_device_put(imx_3stack_snd_device);
+		platform_device_put(imx_umobo_snd_device);
 
 	return ret;
 }
 
-static void __exit imx_3stack_exit(void)
+static void __exit imx_umobo_exit(void)
 {
-	platform_driver_unregister(&imx_3stack_id95apm_audio_driver);
-	platform_device_unregister(imx_3stack_snd_device);
+	platform_driver_unregister(&imx_umobo_id95apm_audio_driver);
+	platform_device_unregister(imx_umobo_snd_device);
 }
 
-module_init(imx_3stack_init);
-module_exit(imx_3stack_exit);
+module_init(imx_umobo_init);
+module_exit(imx_umobo_exit);
 
-MODULE_AUTHOR("Freescale Semiconductor, Inc.");
-MODULE_DESCRIPTION("ID95APM Driver for i.MX 3STACK");
+MODULE_AUTHOR("Pierluigi Passaro <p.passaro@u-mobo.com>");
+MODULE_DESCRIPTION("ID95APM Driver for i.MX U-MoBo");
 MODULE_LICENSE("GPL");
