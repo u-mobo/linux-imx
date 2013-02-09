@@ -358,30 +358,42 @@ static int id95apm_jack_func;
 static int id95apm_spk_func;
 static int id95apm_line_in_func;
 
+static void headphone_detect_handler(struct work_struct *work);
+static DECLARE_DELAYED_WORK(hp_event, headphone_detect_handler);
+
 static void headphone_detect_handler(struct work_struct *work)
 {
 	struct imx_umobo_priv *priv = &card_priv;
 	struct platform_device *pdev = priv->pdev;
 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
 	int hp_status;
+	static int hp_previous_status = -1;
 	char *envp[3];
 	char *buf;
 
 	sysfs_notify(&pdev->dev.kobj, NULL, "headphone");
 	hp_status = plat->hp_status();
 
-	/* setup a message for userspace headphone in */
-	buf = kmalloc(32, GFP_ATOMIC);
-	if (!buf) {
-		pr_err("%s kmalloc failed\n", __func__);
+	if (hp_previous_status != hp_status) {
+		hp_previous_status = hp_status;
+		/* setup a message for userspace headphone in */
+		buf = kmalloc(32, GFP_ATOMIC);
+		if (!buf) {
+			pr_err("%s kmalloc failed\n", __func__);
+			return;
+		}
+		envp[0] = "NAME=headphone";
+		snprintf(buf, 32, "STATE=%d", hp_status);
+		envp[1] = buf;
+		envp[2] = NULL;
+		kobject_uevent_env(&pdev->dev.kobj, KOBJ_CHANGE, envp);
+		kfree(buf);
+	}
+
+	if (plat->hp_irq == 0) {
+		schedule_delayed_work(&hp_event, msecs_to_jiffies(200));
 		return;
 	}
-	envp[0] = "NAME=headphone";
-	snprintf(buf, 32, "STATE=%d", hp_status);
-	envp[1] = buf;
-	envp[2] = NULL;
-	kobject_uevent_env(&pdev->dev.kobj, KOBJ_CHANGE, envp);
-	kfree(buf);
 
 	if (hp_status)
 		set_irq_type(plat->hp_irq, IRQ_TYPE_EDGE_FALLING);
@@ -389,8 +401,6 @@ static void headphone_detect_handler(struct work_struct *work)
 		set_irq_type(plat->hp_irq, IRQ_TYPE_EDGE_RISING);
 	enable_irq(plat->hp_irq);
 }
-
-static DECLARE_DELAYED_WORK(hp_event, headphone_detect_handler);
 
 static irqreturn_t imx_headphone_detect_handler(int irq, void *data)
 {
@@ -672,7 +682,10 @@ static int __devinit imx_umobo_id95apm_probe(struct platform_device *pdev)
 
 	priv->sysclk = plat->sysclk;
 
-	if (plat->hp_status) {
+	if (plat->hp_irq == 0) {
+		if (plat->hp_status)
+			schedule_delayed_work(&hp_event, msecs_to_jiffies(200));
+	} else if (plat->hp_status) {
 		if (plat->hp_status())
 			ret = request_irq(plat->hp_irq,
 					  imx_headphone_detect_handler,
