@@ -85,13 +85,20 @@ static int id95apm_gpio_direction_out(struct gpio_chip *chip,
 {
 	struct id95apm_gpio *id95apm_gpio = to_id95apm_gpio(chip);
 	struct id95apm *id95apm = id95apm_gpio->id95apm;
+	int ret;
 
 	/* Set this pin to GPIO and not ADC or special function */
 	id95apm_gpio_set_gpio(id95apm, offset);
 
 	/* Set bit for output */
-	return id95apm_clrset_bits16(id95apm, ID95APM_PCON_GPIO_DIR,
+	ret = id95apm_clrset_bits16(id95apm, ID95APM_PCON_GPIO_DIR,
 				     0, 1 << offset);
+
+	/* Set bit value */
+	ret = id95apm_clrset_bits16(id95apm, ID95APM_PCON_GPIO_DATA,
+				    1 << offset, value << offset);
+
+	return ret;
 }
 
 static void id95apm_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
