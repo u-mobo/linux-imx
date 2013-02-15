@@ -71,7 +71,7 @@ static int __devinit da9052_i2c_probe(struct i2c_client *client,
 	da9052_i2c->adapter = adapter;
 
 	/* host i2c driver looks only first 7 bits for the slave address */
-	da9052_i2c->slave_addr = DA9052_I2C_ADDR >> 1;
+	da9052_i2c->slave_addr = client->addr;
 
 	/* Store the i2c client data */
 	i2c_set_clientdata(client, da9052_i2c);
