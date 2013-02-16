@@ -25,7 +25,7 @@
  * Contact Clicktouch Semiconductor at www.Clicktouch.eu
  *
  */
-#define DEBUG
+//#define DEBUG
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -219,12 +219,6 @@ static void process_data(struct clicktouch_ts *ts)
 
 	touches -= invalid_touches;
 
-	for (i = 0; multitouch && i < ts->previous_touches - touches; i++) {
-		input_report_abs(ts->input, ABS_MT_TRACKING_ID, id);
-		input_report_abs(ts->input, ABS_MT_PRESSURE, 0);
-		input_mt_sync(ts->input);
-	}
-
 	if (touches && !(ts->previous_touches))
 		input_report_key(ts->input, BTN_TOUCH, 1);
 	else if (!touches && (ts->previous_touches))
@@ -385,7 +379,8 @@ static int clicktouch_ts_init(struct i2c_client *client, struct clicktouch_ts *t
 		clicktouch_config_touch_irq(ts);
 	} else {
 		dev_dbg(&ts->client->dev, "platform data unavailable\n");
-		ts->invert_x = 1;
+		ts->invert_x = 0;
+		ts->invert_y = 0;
 		ts->swap_xy = 1;
 	}
 
