@@ -57,3 +57,4 @@ obj-$(CONFIG_TOUCHSCREEN_DA9052)        += da9052_tsi.o da9052_tsi_filter.o da90
 obj-$(CONFIG_TOUCHSCREEN_MAX11801)	+= max11801_ts.o
 obj-$(CONFIG_TOUCHSCREEN_ID95APM)	+= id95apm_ts.o
 obj-$(CONFIG_TOUCHSCREEN_CLICKTOUCH)	+= clicktouch_ts.o
+obj-$(CONFIG_TOUCHSCREEN_SX865X)	+= sx865x.o

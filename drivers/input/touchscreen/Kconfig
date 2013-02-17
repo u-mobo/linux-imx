@@ -702,4 +702,15 @@ config TOUCHSCREEN_CLICKTOUCH
 	  To compile this driver as a module, choose M here: the
 	  module will be called clicktouch_ts.
 
+config TOUCHSCREEN_SX865X
+	tristate "Semtech SX865X and SX867X touchscreen controllers"
+	depends on I2C
+	help
+	  Say Y here if you have a Semtech SX865X or SX867X touchscreen controller.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sx865x.
+
 endif
