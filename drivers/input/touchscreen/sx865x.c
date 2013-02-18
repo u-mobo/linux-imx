@@ -437,8 +437,8 @@ static int sx865x_probe(struct i2c_client *client,
 		ts->swap_xy = pdata->flags & SX865X_SWAP_XY;
 	} else {
 		/* U-MoBo defaults */
-		ts->x_plate_ohms = 730;
-		ts->y_plate_ohms = 320;
+		ts->x_plate_ohms = 600;
+		ts->y_plate_ohms = 300;
 		ts->invert_x = 0;
 		ts->invert_y = 1;
 		ts->swap_xy = 0;
