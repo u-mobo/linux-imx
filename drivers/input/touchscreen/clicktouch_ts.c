@@ -380,7 +380,7 @@ static int clicktouch_ts_init(struct i2c_client *client, struct clicktouch_ts *t
 	} else {
 		dev_dbg(&ts->client->dev, "platform data unavailable\n");
 		ts->invert_x = 0;
-		ts->invert_y = 0;
+		ts->invert_y = 1;
 		ts->swap_xy = 1;
 	}
 
