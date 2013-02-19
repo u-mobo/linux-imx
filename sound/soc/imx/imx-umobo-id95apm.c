@@ -423,7 +423,7 @@ static ssize_t show_headphone(struct device_driver *dev, char *buf)
 		if (hp_status == 0)
 			strcpy(buf, "speaker\n");
 		else
-			strcpy(buf, "headphone\n");
+			strcpy(buf, "headset\n");
 	} else
 		strcpy(buf, "unknown\n");
 
@@ -585,7 +585,7 @@ static int imx_umobo_id95apm_init(struct snd_soc_codec *codec)
 	}
 	asrc_ssi_data.output_sample_rate = id95apm_rates[asrc_func];
 #endif
-
+#if 0
 	/* Add imx_umobo specific controls */
 	for (i = 0; i < ARRAY_SIZE(id95apm_machine_controls); i++) {
 		ret = snd_ctl_add(codec->card,
@@ -605,7 +605,7 @@ static int imx_umobo_id95apm_init(struct snd_soc_codec *codec)
 	snd_soc_dapm_disable_pin(codec, "Line In Jack");
 
 	snd_soc_dapm_sync(codec);
-
+#endif
 	return 0;
 }
 
