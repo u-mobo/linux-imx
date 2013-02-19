@@ -113,6 +113,18 @@ static int id95apm_write(struct snd_soc_codec *codec,
 static DECLARE_TLV_DB_SCALE(dac_tlv, -9525, 75, 1);
 
 /*
+ * MixerOut volume control:
+ * from -46.5 to 0 dB in 1.5 dB steps (mute instead of -46.5 dB)
+ */
+static DECLARE_TLV_DB_SCALE(mixerout_tlv, -4650, 150, 1);
+
+/*
+ * MixerIn volume control:
+ * from -34.5 to 12 dB in 1.5 dB steps (mute instead of -34.5 dB)
+ */
+static DECLARE_TLV_DB_SCALE(mixerin_tlv, -3450, 150, 1);
+
+/*
  * ADC gain control:
  * from 0 to 22.5 dB in 1.5 dB steps
  */
@@ -129,6 +141,7 @@ static const char *id95apm_out_select[] = { "Mixer", "DAC0", "DAC1",
 					    "Line In" };
 static const char *mic_bias_level_txt[] = { "High-Z (Off)", "0.5*AVDD",
 					    "0.9*AVDD", "GND" };
+static const char *id95apm_mic_mode[] = {"Stereo", "Swapped", "Left", "Right"};
 
 static const struct soc_enum mic_bias_level_l =
 	SOC_ENUM_SINGLE(ID95APM_MIC_CTRL, 0, 4, mic_bias_level_txt);
@@ -143,6 +156,7 @@ static struct soc_enum id95apm_enum[] = {
 	SOC_ENUM_DOUBLE(ID95APM_CLASSD_SOURCE, 2, 0, 4, id95apm_out_select),
 	SOC_ENUM_DOUBLE(ID95APM_LINE_OUT_CTRL, 2, 0, 4, id95apm_out_select),
 	SOC_ENUM_DOUBLE(ID95APM_HP_SCTRL, 2, 0, 4, id95apm_out_select),
+	SOC_ENUM_SINGLE(ID95APM_MIC_MODE, 1, 4, id95apm_mic_mode),
 };
 
 static const struct snd_kcontrol_new id95apm_snd_controls[] = {
@@ -157,6 +171,31 @@ static const struct snd_kcontrol_new id95apm_snd_controls[] = {
 		     7, 1, 1),
 	SOC_DOUBLE_R("DAC1 Switch", ID95APM_DAC1L_VOL, ID95APM_DAC1R_VOL,
 		     7, 1, 1),
+
+	SOC_DOUBLE_R_TLV("MixerOut Volume", ID95APM_MIX_OUTL_VOL,
+			 ID95APM_MIX_OUTR_VOL, 0, 0x1f, 1, mixerout_tlv),
+	SOC_DOUBLE_R("MixerOut Switch", ID95APM_MIX_OUTL_VOL,
+		     ID95APM_MIX_OUTR_VOL, 7, 1, 1),
+
+	SOC_DOUBLE_R_TLV("DAC0 Mixer Volume", ID95APM_DAC0L_MIX_VOL,
+			 ID95APM_DAC0R_MIX_VOL, 0, 0x1f, 1, mixerin_tlv),
+	SOC_DOUBLE_R("DAC0 Mixer Switch", ID95APM_DAC0L_MIX_VOL,
+		     ID95APM_DAC0R_MIX_VOL, 7, 1, 1),
+
+	SOC_DOUBLE_R_TLV("DAC1 Mixer Volume", ID95APM_DAC1L_MIX_VOL,
+			 ID95APM_DAC1R_MIX_VOL, 0, 0x1f, 1, mixerin_tlv),
+	SOC_DOUBLE_R("DAC1 Mixer Switch", ID95APM_DAC1L_MIX_VOL,
+		     ID95APM_DAC1R_MIX_VOL, 7, 1, 1),
+
+	SOC_DOUBLE_R_TLV("Line In Mixer Volume", ID95APM_LINEINL_MIX_VOL,
+			 ID95APM_LINEINR_MIX_VOL, 0, 0x1f, 1, mixerin_tlv),
+	SOC_DOUBLE_R("Line In Mixer Switch", ID95APM_LINEINL_MIX_VOL,
+		     ID95APM_LINEINR_MIX_VOL, 7, 1, 1),
+
+	SOC_DOUBLE_R_TLV("Analog Mic Mixer Volume", ID95APM_AMICL_MIX_VOL,
+			 ID95APM_AMICR_MIX_VOL, 0, 0x1f, 1, mixerin_tlv),
+	SOC_DOUBLE_R("Analog Mic Mixer Switch", ID95APM_AMICL_MIX_VOL,
+		     ID95APM_AMICR_MIX_VOL, 7, 1, 1),
 
 	SOC_DOUBLE_R_TLV("ADC0 Gain", ID95APM_ADC0L_IN_AGAIN,
 			 ID95APM_ADC0R_IN_AGAIN, 0, 0x0f, 0, adc_tlv),
@@ -177,6 +216,9 @@ static const struct snd_kcontrol_new id95apm_snd_controls[] = {
 	SOC_ENUM("I2S1 Input", id95apm_enum[1]),
 	SOC_ENUM("DAC0 Input", id95apm_enum[2]),
 	SOC_ENUM("DAC1 Input", id95apm_enum[3]),
+
+	/* Mic mode */
+	SOC_ENUM("Mic Mode", id95apm_enum[7]),
 };
 
 /* Add non-DAPM controls */
