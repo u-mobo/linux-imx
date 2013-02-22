@@ -16,7 +16,9 @@
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  */
+
 //#define DEBUG
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -24,18 +26,35 @@
 #include <linux/input.h>
 #include <linux/mfd/id95apm.h>
 
-/*
- * Define the auto-update interval for ADC & temp measurement.
- * Resulting interval is 2^n milli-seconds:
- *
- * ID95APM_TSC_UPDATE_INTERVAL = 4
- * -> update-interval = 2^4 = 16ms
- *
- * min = 0  -> update-interval =     1ms
- * max = 15 -> update-interval = 32768ms
- */
-#define ID95APM_TSC_UPDATE_INTERVAL	0
-#define ID95APM_EN_MEASURE	((ID95APM_TSC_UPDATE_INTERVAL << 4) | 0x01)
+#undef ID95APM_TSC_SW_AVERAGE
+#define ID95APM_TSC_SW_AVERAGE
+
+#ifdef ID95APM_TSC_SW_AVERAGE
+
+#define AVERAGE_SHIFT	3
+#define AVERAGE_LEN	8	/* 1 << AVERAGE_SHIFT */
+#define AVERAGE_MASK	7	/* AVERAGE_LEN - 1 */
+
+#define AVERAGE_ARRAY_ADD(array, index, x, y, z) \
+		array[AVERAGE_LEN].x -= array[index].x; \
+		array[AVERAGE_LEN].y -= array[index].y; \
+		array[AVERAGE_LEN].pressure -= array[index].pressure; \
+		array[index].x = x; \
+		array[index].y = y; \
+		array[index].pressure = pressure; \
+		array[AVERAGE_LEN].x += x; \
+		array[AVERAGE_LEN].y += y; \
+		array[AVERAGE_LEN].pressure += pressure
+
+typedef struct point {
+	unsigned x, y, pressure;
+} point_t;
+
+point_t average_array[AVERAGE_LEN + 1];
+static short average_samples = 0;
+static short average_index = 0;
+
+#endif /* ID95APM_TSC_SW_AVERAGE */
 
 /**
  * calibration array refers to
@@ -86,12 +105,16 @@ static void id95apm_tsc_work_handler(struct work_struct *work)
 		input_sync(id95apm->tsc.input);
 		dev_dbg(id95apm->dev, "pen delayed release\n");
 	}
+#ifdef ID95APM_TSC_SW_AVERAGE
+	if (average_samples)
+		average_samples = 0;
+#endif /* ID95APM_TSC_SW_AVERAGE */
 }
 
 static void id95apm_tsc_irq_handler(struct id95apm *id95apm, int irq, void *data)
 {
-	int x, y, pen_down;
-	int z1, z2, rt = 0;
+	unsigned x, y, pen_down;
+	unsigned z1, z2, pressure = 0;
 
 	cancel_delayed_work_sync(&id95apm->tsc.work);
 
@@ -102,35 +125,54 @@ static void id95apm_tsc_irq_handler(struct id95apm *id95apm, int irq, void *data
 	z2 = id95apm_reg16_read(id95apm, ID95APM_TSC_CH4_RES);
 
 	if (pen_down) {
-		if ((x != 0) && (z1 != 0)) {
-			//rt = ((x * (z2 - z1)) / z1);
-			rt = z1;
-			dev_dbg(id95apm->dev, "z1:%d, z2:%d, rt:%d\n",
-				z1, z2, rt);
+		if ((x != 0) && (z1 != z2)) {
+			pressure = (z1 << 20) / (x * (z2 - z1));
+			dev_dbg(id95apm->dev, "z1:%d, z2:%d, pressure:%d\n", z1, z2, pressure);
 		}
 		if (invert_x)
 			x = (~x) & 0xfff;
 		if (invert_y)
 			y = (~y) & 0xfff;
+		dev_dbg(id95apm->dev, "pen down at [%d, %d]\n", x, y);
+#ifdef ID95APM_TSC_SW_AVERAGE
+		if (average_samples == 0) {
+			average_index = 0;
+			memset(average_array, 0, sizeof(average_array));
+		}
+		AVERAGE_ARRAY_ADD(average_array, average_index, x, y, pressure);
+		average_index++;
+		average_index &= AVERAGE_MASK;
+		if (average_samples < AVERAGE_MASK) {
+			average_samples++;
+			schedule_delayed_work(&id95apm->tsc.work, HZ / 20);
+			id95apm_clrset_bits(id95apm, ID95APM_TSC_PENDING_IRQ, 0x01, 0x01);
+			return;
+		} else {
+			x = average_array[AVERAGE_LEN].x >> AVERAGE_SHIFT;
+			y = average_array[AVERAGE_LEN].y >> AVERAGE_SHIFT;
+			pressure = average_array[AVERAGE_LEN].pressure >> AVERAGE_SHIFT;
+		}
+#endif /* ID95APM_TSC_SW_AVERAGE */
 		do_calibration(&x, &y);
 		input_report_abs(id95apm->tsc.input, ABS_X, x);
 		input_report_abs(id95apm->tsc.input, ABS_Y, y);
-		input_report_abs(id95apm->tsc.input, ABS_PRESSURE, rt);
+		input_report_abs(id95apm->tsc.input, ABS_PRESSURE, pressure);
 		if (!id95apm->tsc.button_pressed) {
 			id95apm->tsc.button_pressed = 1;
 			input_report_key(id95apm->tsc.input, BTN_TOUCH, 1);
 		}
 		input_sync(id95apm->tsc.input);
 		schedule_delayed_work(&id95apm->tsc.work, HZ / 50);
-		dev_dbg(id95apm->dev, "pen down at [%d, %d]\n", x, y);
 	} else if (id95apm->tsc.button_pressed) {
+#ifdef ID95APM_TSC_SW_AVERAGE
+		average_samples = 0;
+#endif /* ID95APM_TSC_SW_AVERAGE */
 		id95apm->tsc.button_pressed = 0;
 		input_report_abs(id95apm->tsc.input, ABS_PRESSURE, 0);
 		input_report_key(id95apm->tsc.input, BTN_TOUCH, 0);
 		input_sync(id95apm->tsc.input);
 		dev_dbg(id95apm->dev, "pen release\n");
 	}
-	
 
 	id95apm_clrset_bits(id95apm, ID95APM_TSC_PENDING_IRQ, 0x01, 0x01);
 }
@@ -205,12 +247,17 @@ static int __devinit id95apm_tsc_probe(struct platform_device *pdev)
 
 	id95apm->tsc.button_pressed = 0;
 
-	/* Disable touch interrupt */
+#ifdef ID95APM_TSC_SW_AVERAGE
+	/* Disable touch average */
+	id95apm_clrset_bits(id95apm, ID95APM_TSC_AVERAGE_TIMER, 0x38, 0x00);
+#else
+	/* Enable touch average */
 	id95apm_clrset_bits(id95apm, ID95APM_TSC_AVERAGE_TIMER, 0x38, 0x20);
+#endif /* ID95APM_TSC_SW_AVERAGE */
 
-	/* Configure touch: 1.02ms pendown debounce, 2.05ms penup debounce,
+	/* Configure touch: 8.19ms pendown debounce, 8.19ms penup debounce,
 	 * z1 and z2 measure, 96us acquisition delay */
-	id95apm_reg_write(id95apm, ID95APM_TSC_CONFIG, 0xf9);
+	id95apm_reg_write(id95apm, ID95APM_TSC_CONFIG, 0xfe);
 
 	INIT_DELAYED_WORK(&id95apm->tsc.work, id95apm_tsc_work_handler);
 
