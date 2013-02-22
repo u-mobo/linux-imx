@@ -162,7 +162,7 @@ static void id95apm_tsc_irq_handler(struct id95apm *id95apm, int irq, void *data
 			input_report_key(id95apm->tsc.input, BTN_TOUCH, 1);
 		}
 		input_sync(id95apm->tsc.input);
-		schedule_delayed_work(&id95apm->tsc.work, HZ / 50);
+		schedule_delayed_work(&id95apm->tsc.work, HZ / 20);
 	} else if (id95apm->tsc.button_pressed) {
 #ifdef ID95APM_TSC_SW_AVERAGE
 		average_samples = 0;
