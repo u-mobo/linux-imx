@@ -111,12 +111,16 @@
 #define POWDLY_9MS		0x0e
 #define POWDLY_18MS		0x0f
 
+#define MAX_11BIT		((1 << 11) - 1)
 #define MAX_12BIT		((1 << 12) - 1)
 
 /* when changing the channel mask, also change the read length appropriately */
-#define CHAN_MASK		(CONV_X | CONV_Y | CONV_Z1 | CONV_RX | CONV_RY)
-#define NUM_CHANNELS_SEQ	5
-#define CHAN_READ_LENGTH	(NUM_CHANNELS_SEQ * 2)
+#define CHAN_SINGLETOUCH_MASK	(CONV_X | CONV_Y | CONV_Z1 | CONV_Z2)
+#define CHAN_MULTITOUCH_MASK	(CHAN_SINGLETOUCH_MASK | CONV_RX | CONV_RY)
+#define NUM_SINGLETOUCH_CHANS	4
+#define NUM_MULTITOUCH_CHANS	6
+#define NUM_MAX_CHANS		NUM_MULTITOUCH_CHANS
+#define CHAN_READ_LENGTH(chans)	(chans << 1)
 
 #define SX_MULTITOUCH		0x01
 #define SX_PROXIMITY_SENSING	0x02
@@ -129,7 +133,7 @@
 
 struct ts_event {
 	u16 x, y;
-	u16 z1;
+	u16 z1, z2;
 	u16 rx, ry;
 };
 
@@ -149,40 +153,138 @@ struct sx865x {
 	u16 swap_xy;
 	u16 x_plate_ohms;
 	u16 y_plate_ohms;
+	u16 max_dx, min_rx;
+	u16 max_dy, min_ry;
 	u16 scantime_jiffies;
 
 	unsigned pendown;
 	int irq;
 };
 
+#define AVERAGE_SHIFT	2
+#define AVERAGE_LEN	4	/* 1 << AVERAGE_SHIFT */
+#define AVERAGE_MASK	3	/* AVERAGE_LEN - 1 */
 
 static void sx865x_send_event(struct sx865x *ts)
 {
-	u32 rt;
-	u16 x, y, z1;
+	u32 pressure;
+	u16 x, y, z1, z2;
+	u16 rx, ry;
+	s16 dx = 0, dy = 0;
+
+	static u16 second_touch = 0;
+	static u16 average_index = 0;
+	static struct ts_event average_array[AVERAGE_LEN + 1];
 
 	x = ts->tc.x;
 	y = ts->tc.y;
 	z1 = ts->tc.z1;
+	z2 = ts->tc.z2;
 
-	/* range filtering */
-	if (y == MAX_12BIT)
-		y = 0;
+	if (ts->features & SX_MULTITOUCH) {
+		rx = ts->tc.rx;
+		ry = ts->tc.ry;
 
-	if (likely(y && z1)) {
-		/* compute touch pressure resistance */
-		rt = z1;
-	} else
-		rt = 0;
+		if (ts->tc.rx < ts->min_rx)
+			ts->min_rx = ts->tc.rx;
+		if (ts->tc.ry < ts->min_ry)
+			ts->min_ry = ts->tc.ry;
+		dx = rx - ts->min_rx;
+		dy = ry - ts->min_ry;
+		if ((dx > 8) || (dy > 8)) {
+			if (second_touch) {
+				average_index &= AVERAGE_MASK;
+				average_array[AVERAGE_LEN].x -= average_array[average_index].x;
+				average_array[AVERAGE_LEN].y -= average_array[average_index].y;
+				average_array[AVERAGE_LEN].rx -= average_array[average_index].rx;
+				average_array[AVERAGE_LEN].ry -= average_array[average_index].ry;
+				average_array[average_index].x = x;
+				average_array[average_index].y = y;
+				average_array[average_index].rx = rx;
+				average_array[average_index].ry = ry;
+				average_array[AVERAGE_LEN].x += x;
+				average_array[AVERAGE_LEN].y += y;
+				average_array[AVERAGE_LEN].rx += rx;
+				average_array[AVERAGE_LEN].ry += ry;
+				x = average_array[AVERAGE_LEN].x >> AVERAGE_SHIFT;
+				y = average_array[AVERAGE_LEN].y >> AVERAGE_SHIFT;
+				rx = average_array[AVERAGE_LEN].rx >> AVERAGE_SHIFT;
+				ry = average_array[AVERAGE_LEN].ry >> AVERAGE_SHIFT;
+				dx = rx - ts->min_rx;
+				dy = ry - ts->min_ry;
+				average_index++;
+			} else {
+				/* no previous second touch */
+				for (average_index = 0; average_index < AVERAGE_LEN; average_index++) {
+					average_array[average_index].x = x;
+					average_array[average_index].y = y;
+					average_array[average_index].rx = rx;
+					average_array[average_index].ry = ry;
+				}
+				average_array[AVERAGE_LEN].x = x << AVERAGE_SHIFT;
+				average_array[AVERAGE_LEN].y = y << AVERAGE_SHIFT;
+				average_array[AVERAGE_LEN].rx = rx << AVERAGE_SHIFT;
+				average_array[AVERAGE_LEN].ry = ry << AVERAGE_SHIFT;
+				second_touch = 1;
+			}
 
-	/* Sample found inconsistent by debouncing or pressure is beyond
-	 * the maximum. Don't report it to user space, repeat at least
-	 * once more the measurement
-	 */
-	if (rt > MAX_12BIT) {
-		dev_dbg(&ts->client->dev, "ignored pressure %d\n", rt);
-		return;
+			dev_dbg(&ts->client->dev, "minr(%4d,%4d), d(%4d,%4d), maxd(%4d,%4d)\n", ts->min_rx, ts->min_ry, dx, dy, ts->max_dx, ts->max_dy);
+
+			if (dx > ts->max_dx)
+				ts->max_dx = dx;
+			if (dy > ts->max_dy)
+				ts->max_dy = dy;
+			dx = (dx << 11) / ts->max_dx;
+			dy = (dy << 11) / ts->max_dy;
+
+			if (dx >> 11)
+				dx = MAX_11BIT;
+			if (dx > x)
+				dx = x;
+			if (x + dx > MAX_12BIT)
+				dx = MAX_12BIT - x;
+			if (dy >> 11)
+				dy = MAX_11BIT;
+			if (dy > y)
+				dy = y;
+			if (y + dy > MAX_12BIT)
+				dy = MAX_12BIT - y;
+		} else {
+			dx = dy = 0;
+			second_touch = 0;
+		}
 	}
+
+	/* compute touch pressure */
+	if ((y != 0) && (z1 != z2)) {
+		if (z2 > z1) {
+			pressure = (z1 << 20) / (y * (z2 - z1));
+		} else {
+			pressure = (z1 << 20) / (y * (z1 - z2));
+			/* FIXME?
+			 * This technology provide a middle point and a delta
+			 * between points, but this delta is unsigned.
+			 * This means that the first point is assumed to have
+			 * lowest x and y and second point higher x and y.
+			 * When the real points mix higher and lower x and y
+			 * this condition lead to false estimated points
+			 * detection.
+			 * However pinch and zoom keep on working due to the
+			 * coherent variation of the estimated position.
+			 * Strange behaviour: z2 is higher than z1 almost
+			 * always. Somtimes z2 became lower, but only when
+			 * real points mix higher and lower x and y.
+			 * In this specific case, the following line leads to
+			 * correct estimation, but this depends on the applyed
+			 * pressure level, so at present we don't use it to
+			 * avoid inconsistent behaviours
+			 * dx = -dx;
+			 */
+		}
+		if (pressure > MAX_12BIT)
+			pressure = MAX_12BIT;
+	} else
+		pressure = MAX_12BIT;
 
 	/* NOTE: We can't rely on the pressure to determine the pen down
 	 * state, even this controller has a pressure sensor. The pressure
@@ -192,7 +294,7 @@ static void sx865x_send_event(struct sx865x *ts)
 	 * The only safe way to check for the pen up condition is in the
 	 * timer by reading the pen signal state (it's a GPIO _and_ IRQ).
 	 */
-	if (rt) {
+	if (pressure) {
 		struct input_dev *input = ts->input;
 
 		if (ts->invert_x){
@@ -214,36 +316,35 @@ static void sx865x_send_event(struct sx865x *ts)
 
 
 		if (ts->features & SX_MULTITOUCH) {
-			input_report_abs(ts->input, ABS_MT_POSITION_X, x);
-			input_report_abs(ts->input, ABS_MT_POSITION_Y, y);
-			input_report_abs(ts->input, ABS_MT_PRESSURE, rt);
+			input_report_abs(ts->input, ABS_MT_POSITION_X, x - dx);
+			input_report_abs(ts->input, ABS_MT_POSITION_Y, y - dy);
+			input_report_abs(ts->input, ABS_MT_PRESSURE, pressure);
 			input_report_abs(ts->input, ABS_MT_TRACKING_ID, 0);
 			input_mt_sync(ts->input);
-#if 0
-			input_report_abs(ts->input, ABS_MT_POSITION_X, ts->tc.rx);
-			input_report_abs(ts->input, ABS_MT_POSITION_Y, ts->tc.ry);
-			input_report_abs(ts->input, ABS_MT_PRESSURE, rt);
-			input_report_abs(ts->input, ABS_MT_TRACKING_ID, 1);
-			input_mt_sync(ts->input);
-#endif
+			if (second_touch) {
+				input_report_abs(ts->input, ABS_MT_POSITION_X, x + dx);
+				input_report_abs(ts->input, ABS_MT_POSITION_Y, y + dy);
+				input_report_abs(ts->input, ABS_MT_PRESSURE, pressure);
+				input_report_abs(ts->input, ABS_MT_TRACKING_ID, 1);
+				input_mt_sync(ts->input);
+			}
+			dev_dbg(&ts->client->dev, "midpoint(%4d,%4d), deltap(%4d,%4d), pressure (%4u)\n", x, y, dx, dy, pressure);
 		} else {
 			input_report_abs(input, ABS_X, x);
 			input_report_abs(input, ABS_Y, y);
-			input_report_abs(input, ABS_PRESSURE, rt);
+			input_report_abs(input, ABS_PRESSURE, pressure);
+			dev_dbg(&ts->client->dev, "point(%4d,%4d), pressure (%4u)\n", x, y, pressure);
 		}
 
 		input_sync(input);
-
-		dev_dbg(&ts->client->dev, "point(%4d,%4d), pressure (%4u)\n",
-			x, y, rt);
 	}
 }
 
 static int sx865x_read_values(struct sx865x *ts)
 {
 	s32 data;
-	u16 vals[NUM_CHANNELS_SEQ+1];	// +1 for last dummy read
-	int length;
+	u16 vals[NUM_MAX_CHANS+1];	// +1 for last dummy read
+	int length, chan_read_length;
 	int i;
 
 	memset(&(ts->tc), 0, sizeof(ts->tc));
@@ -251,16 +352,21 @@ static int sx865x_read_values(struct sx865x *ts)
 	 * S Addr R A [DataLow] A [DataHigh] A (repeat) NA P
 	 * Where DataLow has (channel | [D11-D8]), DataHigh has [D7-D0].
 	 */
-	length = i2c_master_recv(ts->client, (char *)vals, CHAN_READ_LENGTH);
+	if (ts->features & SX_MULTITOUCH)
+		chan_read_length = CHAN_READ_LENGTH(NUM_MULTITOUCH_CHANS);
+	else
+		chan_read_length = CHAN_READ_LENGTH(NUM_SINGLETOUCH_CHANS);
 
-	if (likely(length == CHAN_READ_LENGTH)) {
+	length = i2c_master_recv(ts->client, (char *)vals, chan_read_length);
+
+	if (likely(length == chan_read_length)) {
 		length >>= 1;
 		for (i = 0; i < length; i++) {
 			u16 ch;
 			data = swab16(vals[i]);
 			if (unlikely(data & 0x8000)) {
 				dev_err(&ts->client->dev, "hibit @ %d [0x%04x]\n", i, data);
-				continue;
+				return -EAGAIN;
 			}
 			ch = data >> 12;
 			if (ch == CH_X) {
@@ -269,6 +375,8 @@ static int sx865x_read_values(struct sx865x *ts)
 				ts->tc.y = data & 0xfff;
 			} else if (ch == CH_Z1) {
 				ts->tc.z1 = data & 0xfff;
+			} else if (ch == CH_Z2) {
+				ts->tc.z2 = data & 0xfff;
 			} else if (ch == CH_RX) {
 				ts->tc.rx = data & 0xfff;
 			} else if (ch == CH_RY) {
@@ -281,8 +389,8 @@ static int sx865x_read_values(struct sx865x *ts)
 		dev_err(&ts->client->dev, "%d = recv()\n", length);
 	}
 
-	dev_dbg(&ts->client->dev, "X:%03x Y:%03x Z1:%03x RX:%03x RY:%03x\n",
-		ts->tc.x, ts->tc.y, ts->tc.z1, ts->tc.rx, ts->tc.ry);
+	dev_dbg(&ts->client->dev, "X:%d Y:%d Z1:%d Z2:%d RX:%d RY:%d\n",
+		ts->tc.x, ts->tc.y, ts->tc.z1, ts->tc.z2, ts->tc.rx, ts->tc.ry);
 
 	return !ts->tc.z1;	/* return 0 only if pressure not 0 */
 }
@@ -432,6 +540,8 @@ static int sx865x_probe(struct i2c_client *client,
 	if (pdata) {
 		ts->x_plate_ohms = pdata->x_plate_ohms;
 		ts->y_plate_ohms = pdata->y_plate_ohms;
+		ts->max_dx = pdata->max_dx;
+		ts->max_dy = pdata->max_dy;
 		ts->invert_x = pdata->flags & SX865X_INVERT_X;
 		ts->invert_y = pdata->flags & SX865X_INVERT_Y;
 		ts->swap_xy = pdata->flags & SX865X_SWAP_XY;
@@ -443,6 +553,12 @@ static int sx865x_probe(struct i2c_client *client,
 		ts->invert_y = 1;
 		ts->swap_xy = 0;
 	}
+	if (!ts->max_dx)
+		ts->max_dx = MAX_12BIT >> 3;
+	if (!ts->max_dy)
+		ts->max_dy = MAX_12BIT >> 4;
+	ts->min_rx = ts->min_ry = MAX_12BIT;
+
 	ts->scantime_jiffies = msecs_to_jiffies(SX865X_UP_SCANTIME_MS);
 
 	input_dev->name = "SX865X Touchscreen";
@@ -470,14 +586,14 @@ static int sx865x_probe(struct i2c_client *client,
 	err = i2c_smbus_write_byte_data(client, reset_reg, SOFTRESET_VALUE);
 	/* soft reset: SX8650 fails to nak at the end, ignore return value */
 
-	/* set mask to convert X, Y, Z1, RX, RY for CH_SEQ */
-	err = i2c_smbus_write_byte_data(client, I2C_REG_CHANMASK, CHAN_MASK);
-	if (err != 0) {
-		dev_err(&client->dev, "write mask fail");
-		goto err_free_mem;
-	}
 
 	if (ts->features & SX_MULTITOUCH) {
+		/* set mask to convert X, Y, Z1, Z2, RX, RY for CH_SEQ */
+		err = i2c_smbus_write_byte_data(client, I2C_REG_CHANMASK, CHAN_MULTITOUCH_MASK);
+		if (err != 0) {
+			dev_err(&client->dev, "write mask fail");
+			goto err_free_mem;
+		}
 		if (ts->x_plate_ohms < 100)
 			ts->x_plate_ohms = 100;
 		if (ts->y_plate_ohms < 100)
@@ -487,6 +603,13 @@ static int sx865x_probe(struct i2c_client *client,
 		err = i2c_smbus_write_byte_data(client, I2C_REG_CTRL3, rmselx | (rmsely << 3));
 		if (err != 0) {
 			dev_err(&client->dev, "writereg3 fail");
+			goto err_free_mem;
+		}
+	} else {
+		/* set mask to convert X, Y, Z1, Z2 for CH_SEQ */
+		err = i2c_smbus_write_byte_data(client, I2C_REG_CHANMASK, CHAN_SINGLETOUCH_MASK);
+		if (err != 0) {
+			dev_err(&client->dev, "write mask fail");
 			goto err_free_mem;
 		}
 	}
@@ -610,7 +733,7 @@ static void __exit sx865x_exit(void)
 module_init(sx865x_init);
 module_exit(sx865x_exit);
 
-MODULE_AUTHOR("Pierluigi Passaro <info@phoenixsoftware.it>");
+MODULE_AUTHOR("Pierluigi Passaro <p.passaro@u-mobo.com>");
 MODULE_DESCRIPTION("SX865X TouchScreen Driver");
 MODULE_LICENSE("GPL");
 
