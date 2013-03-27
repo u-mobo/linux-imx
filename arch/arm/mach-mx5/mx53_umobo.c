@@ -1533,8 +1533,13 @@ static struct spi_board_info mxc_psoc_device[] __initdata = {
 	 .modalias = "spidev",
 	 .max_speed_hz = 20000000,	/* max spi clock (SCK) speed in HZ */
 	 .bus_num = 1,
-	 .chip_select = 1,
-//	 .platform_data = &mxc_spi_flash_data[0],
+	 .chip_select = 0,		/* DEVICE = /dev/spidev1.0 */
+	},
+	{
+	 .modalias = "spidev",
+	 .max_speed_hz = 20000000,	/* max spi clock (SCK) speed in HZ */
+	 .bus_num = 1,
+	 .chip_select = 1,		/* DEVICE = /dev/spidev1.1 */
 	},
 };
 
