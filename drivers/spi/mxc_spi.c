@@ -1297,7 +1297,7 @@ static int mxc_spi_probe(struct platform_device *pdev)
 	    master_drv_data->base +
 	    master_drv_data->spi_ver_def->reset_reg_addr;
 
-	master_drv_data->clk = clk_get(&pdev->dev, "cspi_clk");
+	master_drv_data->clk = clk_get(&pdev->dev, "mxc_clk");
 	clk_enable(master_drv_data->clk);
 	master_drv_data->spi_ipg_clk = clk_get_rate(master_drv_data->clk);
 
