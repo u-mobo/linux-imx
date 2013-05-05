@@ -1142,6 +1142,11 @@ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
 		.irq = gpio_to_irq(MX53_UMOBO_SENS_GPIOIRQ),
 	},
 	{
+		I2C_BOARD_INFO("l3gd20", 0x6b),
+		.platform_data = &umobo_l3g4200d_data,
+		// FIXME? ST driver does not implement IRQ management
+	},
+	{
 		I2C_BOARD_INFO("l3g4200d", 0x69),
 		.platform_data = &umobo_l3g4200d_data,
 		// FIXME? ST driver does not implement IRQ management

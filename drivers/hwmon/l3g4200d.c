@@ -1014,6 +1014,7 @@ static int l3g4200d_resume(struct device *dev)
 
 static const struct i2c_device_id l3g4200d_id[] = {
 	{ L3G4200D_DEV_NAME , 0 },
+	{ "l3gd20" , 1 },
 	{},
 };
 
