@@ -82,6 +82,7 @@
 #include <linux/wl12xx.h>
 
 extern int __init mx53_umobo_init_da9052(void);
+extern int __init mx53_umobo_init_msp430(void);
 
 /*!
  * @file mach-mx5/mx53_umobo.c
@@ -1758,6 +1759,7 @@ static void __init mxc_board_init(void)
 
 	platform_device_register(&leds_gpio);
 	umobo_add_device_buttons();
+	mx53_umobo_init_msp430();
 }
 
 static void __init mx53_umobo_timer_init(void)
