@@ -254,10 +254,50 @@ static void da9052_tsi_avrg_filter(struct da9052_ts_priv *priv,
 }
 #endif
 
+ssize_t da9052_tsi_get_adaptative_calib_display_point(struct da9052_tsi_data *displayPtr, struct da9052_tsi_platform_data *tsi_pdata)
+{
+	static int deltax = 0;
+	static int deltay = 0;
+	struct da9052_tsi_data screen_coord = *displayPtr;
+
+	if (tsi_pdata->xmin > screen_coord.x) {
+		tsi_pdata->xmin = screen_coord.x;
+		deltax = tsi_pdata->xmax - tsi_pdata->xmin + 1;
+		//printk("xmin %d\n", tsi_pdata->xmin);
+	} else if (tsi_pdata->xmax < screen_coord.x) {
+		tsi_pdata->xmax = screen_coord.x;
+		deltax = tsi_pdata->xmax - tsi_pdata->xmin + 1;
+		//printk("xmax %d\n", tsi_pdata->xmax);
+	}
+	if (tsi_pdata->ymin > screen_coord.y) {
+		tsi_pdata->ymin = screen_coord.y;
+		deltay = tsi_pdata->ymax - tsi_pdata->ymin + 1;
+		//printk("ymin %d\n", tsi_pdata->ymin);
+	} else if (tsi_pdata->ymax < screen_coord.y) {
+		tsi_pdata->ymax = screen_coord.y;
+		deltay = tsi_pdata->ymax - tsi_pdata->ymin + 1;
+		//printk("ymax %d\n", tsi_pdata->ymax);
+	}
+
+	if (!deltax)
+		deltax = tsi_pdata->xmax - tsi_pdata->xmin + 1;
+	if (!deltay)
+		deltay = tsi_pdata->ymax - tsi_pdata->ymin + 1;
+
+	displayPtr->x = ((s32)(screen_coord.x - tsi_pdata->xmin) << 10) / deltax;
+	displayPtr->y = ((s32)(screen_coord.y - tsi_pdata->ymin) << 10) / deltay;
+
+#if DA9052_TSI_CALIB_DATA_PROFILING
+	printk("C\tX\t%4d\tY\t%4d\n", displayPtr->x, displayPtr->y);
+#endif
+	return TRUE;
+}
+
 s32 da9052_tsi_raw_proc_thread(void *ptr)
 {
 	struct da9052_tsi_data coord;
 	u8 calib_ok, range_ok;
+	u8 calib_adaptative = FALSE;
 	struct calib_cfg_t *tsi_calib = get_calib_config();
 	struct input_dev *ip_dev = (struct input_dev *)
 				da9052_tsi_get_input_dev(
@@ -265,6 +305,9 @@ s32 da9052_tsi_raw_proc_thread(void *ptr)
 	struct da9052_ts_priv *priv = (struct da9052_ts_priv *)ptr;
 
 	set_freezable();
+
+	if ((priv->tsi_pdata->xmin) || (priv->tsi_pdata->ymin) || (priv->tsi_pdata->xmax) || (priv->tsi_pdata->xmax))
+		calib_adaptative = TRUE;
 
 	while (priv->tsi_raw_proc_thread.state == ACTIVE) {
 
@@ -299,8 +342,18 @@ s32 da9052_tsi_raw_proc_thread(void *ptr)
 
 #endif
 
+		if (priv->tsi_pdata->flags & DA9052_FLAG_INVERTX)
+			coord.x ^= DISPLAY_X_MAX;
+		if (priv->tsi_pdata->flags & DA9052_FLAG_INVERTY)
+			coord.y ^= DISPLAY_Y_MAX;
+		if (priv->tsi_pdata->flags & DA9052_FLAG_SWAPXY)
+			swap(coord.x, coord.y);
+
 		if (tsi_calib->calibrate_flag) {
-			calib_ok = da9052_tsi_get_calib_display_point(&coord);
+			if (calib_adaptative)
+				calib_ok = da9052_tsi_get_adaptative_calib_display_point(&coord, priv->tsi_pdata);
+			else
+				calib_ok = da9052_tsi_get_calib_display_point(&coord);
 
 			if ((coord.x < DISPLAY_X_MIN) ||
 				(coord.x > DISPLAY_X_MAX) ||
@@ -310,9 +363,10 @@ s32 da9052_tsi_raw_proc_thread(void *ptr)
 		}
 
 		if (calib_ok && range_ok) {
-			input_report_abs(ip_dev, BTN_TOUCH, 1);
+			input_report_key(ip_dev, BTN_TOUCH, 1);
 			input_report_abs(ip_dev, ABS_X, coord.x);
 			input_report_abs(ip_dev, ABS_Y, coord.y);
+			input_report_abs(ip_dev, ABS_PRESSURE, coord.z);
 			input_sync(ip_dev);
 
 			priv->os_data_cnt++;

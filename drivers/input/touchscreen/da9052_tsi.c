@@ -871,6 +871,10 @@ static ssize_t da9052_tsi_config_power_supply(struct da9052_ts_priv *priv,
 		return -EINVAL;
 	}
 
+	/* check for valid ldo number: 0 means externally managed */
+	if (!priv->tsi_pdata->tsi_ref_source)
+		return 0;
+
 	ldo_config.ldo_volt = priv->tsi_pdata->tsi_supply_voltage;
 	ldo_config.ldo_num =  priv->tsi_pdata->tsi_ref_source;
 	ldo_config.ldo_conf = RESET;
@@ -1086,7 +1090,6 @@ static u32 da9052_tsi_get_reg_data(struct da9052_ts_priv *priv)
 static ssize_t da9052_tsi_reg_proc_thread(void *ptr)
 {
 	u32 data_cnt;
-	ssize_t ret = 0;
 	struct da9052_tsi_info *ts;
 	struct da9052_ts_priv *priv = (struct da9052_ts_priv *)ptr;
 
@@ -1155,10 +1158,10 @@ static void da9052_tsi_penup_event(struct da9052_ts_priv *priv)
 	priv->debounce_over = FALSE;
 	priv->win_reference_valid = FALSE;
 
-	printk(KERN_INFO "The raw data count is %d \n", priv->raw_data_cnt);
-	printk(KERN_INFO "The OS data count is %d \n", priv->os_data_cnt);
-	printk(KERN_INFO "PEN UP DECLARED \n");
-	input_report_abs(ip_dev, BTN_TOUCH, 0);
+	DA9052_DEBUG(KERN_INFO "The raw data count is %d \n", priv->raw_data_cnt);
+	DA9052_DEBUG(KERN_INFO "The OS data count is %d \n", priv->os_data_cnt);
+	DA9052_DEBUG(KERN_INFO "PEN UP DECLARED \n");
+	input_report_key(ip_dev, BTN_TOUCH, 0);
 	input_sync(ip_dev);
 	priv->os_data_cnt = 0;
 	priv->raw_data_cnt = 0;
@@ -1226,7 +1229,7 @@ fail:
 
 success:
 	ret = 0;
-	printk(KERN_INFO "Exiting PEN DOWN HANDLER \n");
+	DA9052_DEBUG(KERN_INFO "Exiting PEN DOWN HANDLER \n");
 }
 
 void da9052_tsi_data_ready_handler(struct da9052_eh_nb *eh_data, u32 event)
