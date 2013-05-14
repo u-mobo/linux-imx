@@ -28,6 +28,8 @@
 #include <linux/mfd/da9052/adc.h>
 
 #define DA9052_BAT_DEVICE_NAME			"da9052-bat"
+#define DA9052_AC_CHARGER_DEVICE_NAME		"da9052-ac-charger"
+#define DA9052_USB_CHARGER_DEVICE_NAME		"da9052-usb-charger"
 
 static const char  __initdata banner[] = KERN_INFO "DA9052 BAT, (c) \
 2009 Dialog semiconductor Ltd.\n";
@@ -93,7 +95,7 @@ static s32 da9052_adc_read_tbat(struct da9052 *da9052, u16 *data)
 	*data = (u16)reg_data;
 
 	DA9052_DEBUG("In function: %s, TBATRES_REG value read (1)= 0x%X \n",
-		__func__, msg.data);
+		__func__, reg_data);
 	return SUCCESS;
 }
 
@@ -103,7 +105,7 @@ s32 da9052_adc_read_vbat(struct da9052 *da9052, u16 *data)
 
 	ret = da9052_manual_read(da9052, DA9052_ADC_VBAT);
 	DA9052_DEBUG("In function: %s, VBAT value read (1)= 0x%X \n",
-		__func__, temp);
+		__func__, ret);
 	if (ret == -EIO) {
 		*data = 0;
 		return ret;
@@ -215,6 +217,7 @@ static void da9052_bat_status_update(struct da9052_charger_device
 		return;
 	}
 	regvalue = msg.data;
+	DA9052_DEBUG("%s STATUSA: 0x%02x\n", __func__, regvalue);
 
 	/* Read Status B register */
 	msg.addr = DA9052_STATUSB_REG;
@@ -225,7 +228,11 @@ static void da9052_bat_status_update(struct da9052_charger_device
 		return;
 	}
 	da9052_unlock(chg_device->da9052);
+	DA9052_DEBUG("%s STATUSB: 0x%02x\n", __func__, msg.data);
 
+	if (chg_device->bat_pdata->force_ac_charger) {
+		chg_device->charger_type = DA9052_WALL_CHARGER;
+	} else
 	/* If DCINDET and DCINSEL are set then connected charger is
 						WALL Charger unit */
 	if( (regvalue & DA9052_STATUSA_DCINSEL) 
@@ -603,6 +610,49 @@ static s32 da9052_bat_unregister_event(struct da9052_charger_device *chg_device)
 	return 0;
 }
 
+static int da9052_ac_charger_get_property(struct power_supply *psy,
+				enum power_supply_property psp,
+				union power_supply_propval *val)
+{
+	struct da9052_charger_device *chg_device =
+	container_of(psy, struct da9052_charger_device, psy_ac);
+	s32 ret = 0;
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		val->intval = (chg_device->charger_type == DA9052_WALL_CHARGER) ? 1: 0;
+		DA9052_DEBUG("ac charger type %d\n", chg_device->charger_type);
+	break;
+	default:
+		ret = -EINVAL;
+	break;
+	}
+	return ret;
+}
+
+static int da9052_usb_charger_get_property(struct power_supply *psy,
+				enum power_supply_property psp,
+				union power_supply_propval *val)
+{
+	struct da9052_charger_device *chg_device =
+	container_of(psy, struct da9052_charger_device, psy_usb);
+	s32 ret = 0;
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		if ((chg_device->charger_type == DA9052_USB_HUB) || (chg_device->charger_type == DA9052_USB_CHARGER))
+			val->intval = 1;
+		else
+			val->intval = 0;
+		DA9052_DEBUG("usb charger type %d\n", chg_device->charger_type);
+	break;
+	default:
+		ret = -EINVAL;
+	break;
+	}
+	return ret;
+}
+
 static int da9052_bat_get_property(struct power_supply *psy,
 				enum power_supply_property psp,
 				union power_supply_propval *val)
@@ -623,7 +673,7 @@ static int da9052_bat_get_property(struct power_supply *psy,
 		val->intval = (chg_device->charger_type == DA9052_NOCHARGER) ? 0: 1;
 		break;
 	case POWER_SUPPLY_PROP_PRESENT:
-		val->intval = chg_device->illegal;
+		val->intval = !chg_device->illegal;
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
 		val->intval = chg_device->health;
@@ -670,6 +720,7 @@ static u8 detect_illegal_battery(struct da9052_charger_device *chg_device)
 		return ret;
 	}
 
+	DA9052_DEBUG("%s: Battery temperature %d\n", __func__, buffer);
 	if (buffer > chg_device->bat_with_no_resistor)
 		chg_device->illegal = TRUE;
 	else
@@ -686,6 +737,7 @@ static u8 detect_illegal_battery(struct da9052_charger_device *chg_device)
 void da9052_update_bat_properties(struct da9052_charger_device *chg_device)
 {
 	/* Get Bat status and type */
+	detect_illegal_battery(chg_device);
 	da9052_bat_status_update(chg_device);
 	da9052_bat_level_update(chg_device);
 }
@@ -709,6 +761,10 @@ static void da9052_bat_work(struct work_struct *work)
 	queue_delayed_work(chg_device->monitor_wqueue, &chg_device->monitor_work, HZ * 8);
 }
 
+static enum power_supply_property da9052_charger_props[] = {
+	POWER_SUPPLY_PROP_ONLINE,
+};
+
 static enum power_supply_property da9052_bat_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_ONLINE,
@@ -726,6 +782,7 @@ static enum power_supply_property da9052_bat_props[] = {
 
 static s32 __devinit da9052_bat_probe(struct platform_device *pdev)
 {
+	struct da9052_bat_platform_data *pdata = pdev->dev.platform_data;
 	struct da9052_charger_device *chg_device;
 	u8 reg_data;
 	int ret;
@@ -734,9 +791,22 @@ static s32 __devinit da9052_bat_probe(struct platform_device *pdev)
 	if (!chg_device)
 		return -ENOMEM;
 
+	chg_device->bat_pdata = pdata;
 	chg_device->da9052 = dev_get_drvdata(pdev->dev.parent);
 	platform_set_drvdata(pdev, chg_device);
 	
+	chg_device->psy_ac.name = DA9052_AC_CHARGER_DEVICE_NAME;
+	chg_device->psy_ac.type = POWER_SUPPLY_TYPE_MAINS;
+	chg_device->psy_ac.get_property = da9052_ac_charger_get_property;
+	chg_device->psy_ac.properties = da9052_charger_props;
+	chg_device->psy_ac.num_properties = ARRAY_SIZE(da9052_charger_props);
+
+	chg_device->psy_usb.name = DA9052_USB_CHARGER_DEVICE_NAME;
+	chg_device->psy_usb.type = POWER_SUPPLY_TYPE_USB;
+	chg_device->psy_usb.get_property = da9052_usb_charger_get_property;
+	chg_device->psy_usb.properties = da9052_charger_props;
+	chg_device->psy_usb.num_properties = ARRAY_SIZE(da9052_charger_props);
+
 	chg_device->psy.name			= DA9052_BAT_DEVICE_NAME;
 	chg_device->psy.type			= POWER_SUPPLY_TYPE_BATTERY;
 	chg_device->psy.properties 		= da9052_bat_props;
@@ -748,7 +818,7 @@ static s32 __devinit da9052_bat_probe(struct platform_device *pdev)
 	chg_device->status 			= POWER_SUPPLY_STATUS_UNKNOWN;
 	chg_device->health 			= POWER_SUPPLY_HEALTH_UNKNOWN;
 	chg_device->technology 			= POWER_SUPPLY_TECHNOLOGY_LION;
-	chg_device->bat_with_no_resistor 	= 62;
+	chg_device->bat_with_no_resistor 	= pdata->bat_with_no_resistor;
 	chg_device->bat_capacity_limit_low 	= 4;
 	chg_device->bat_capacity_limit_high 	= 70;
 	chg_device->bat_capacity_full 		= 100;
@@ -777,18 +847,25 @@ static s32 __devinit da9052_bat_probe(struct platform_device *pdev)
 	bat_hysteresis.hys_flag 	= 0;
 
 	chg_device->illegal 		= FALSE;
-	detect_illegal_battery(chg_device);
 
 	da9052_bat_register_event(chg_device);
 	if (ret)
 		goto err_charger_init;
 	
 	ret = power_supply_register(&pdev->dev, &chg_device->psy);
-	 if (ret)
+	if (ret)
+		goto err_charger_init;
+	
+	ret = power_supply_register(&pdev->dev, &chg_device->psy_ac);
+	if (ret)
+		goto err_charger_init;
+	
+	ret = power_supply_register(&pdev->dev, &chg_device->psy_usb);
+	if (ret)
 		goto err_charger_init;
 	
 	INIT_DELAYED_WORK(&chg_device->monitor_work, da9052_bat_work);
-	chg_device->monitor_wqueue = create_singlethread_workqueue(pdev->dev.bus_id);
+	chg_device->monitor_wqueue = create_singlethread_workqueue("da9052-battery");
 	if (!chg_device->monitor_wqueue) {
 		goto err_charger_init;
 	}
@@ -808,8 +885,7 @@ static int __devexit da9052_bat_remove(struct platform_device *dev)
 	/* unregister the events.*/
 	da9052_bat_unregister_event(chg_device);
 	
-	cancel_rearming_delayed_workqueue(chg_device->monitor_wqueue,
-					  &chg_device->monitor_work);
+	cancel_delayed_work(&chg_device->monitor_work);
 	destroy_workqueue(chg_device->monitor_wqueue);
 	
 	power_supply_unregister(&chg_device->psy);

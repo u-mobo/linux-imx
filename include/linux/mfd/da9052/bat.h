@@ -171,9 +171,12 @@ struct da9052_bat_hysteresis {
 
 struct da9052_charger_device {
 	struct da9052			*da9052;
+	struct da9052_bat_platform_data	*bat_pdata;
 	struct workqueue_struct 	*monitor_wqueue;
 	struct delayed_work 		monitor_work;
 	struct power_supply		psy;
+	struct power_supply		psy_ac;
+	struct power_supply		psy_usb;
 	struct da9052_eh_nb		tbat_eh_data;
 	u8				cal_capacity;
 	u8 				charger_type;
