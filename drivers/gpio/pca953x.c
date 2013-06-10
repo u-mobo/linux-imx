@@ -81,6 +81,8 @@ struct pca953x_chip {
 	uint16_t irq_stat;
 	uint16_t irq_trig_raise;
 	uint16_t irq_trig_fall;
+	uint16_t irq_trig_high;
+	uint16_t irq_trig_low;
 	int	 irq_base;
 #endif
 
@@ -341,6 +343,7 @@ static void pca953x_irq_bus_sync_unlock(struct irq_data *d)
 
 	/* Look for any newly setup interrupt */
 	new_irqs = chip->irq_trig_fall | chip->irq_trig_raise;
+	new_irqs |= chip->irq_trig_high | chip->irq_trig_low;
 	new_irqs &= ~chip->reg_direction;
 
 	while (new_irqs) {
@@ -358,7 +361,7 @@ static int pca953x_irq_set_type(struct irq_data *d, unsigned int type)
 	uint16_t level = d->irq - chip->irq_base;
 	uint16_t mask = 1 << level;
 
-	if (!(type & IRQ_TYPE_EDGE_BOTH)) {
+	if (!(type & IRQ_TYPE_SENSE_MASK)) {
 		dev_err(&chip->client->dev, "irq %d: unsupported type %d\n",
 			d->irq, type);
 		return -EINVAL;
@@ -373,6 +376,16 @@ static int pca953x_irq_set_type(struct irq_data *d, unsigned int type)
 		chip->irq_trig_raise |= mask;
 	else
 		chip->irq_trig_raise &= ~mask;
+
+	if (type & IRQ_TYPE_LEVEL_HIGH)
+		chip->irq_trig_high |= mask;
+	else
+		chip->irq_trig_high &= ~mask;
+
+	if (type & IRQ_TYPE_LEVEL_LOW)
+		chip->irq_trig_low |= mask;
+	else
+		chip->irq_trig_low &= ~mask;
 
 	return 0;
 }
@@ -412,14 +425,17 @@ static uint16_t pca953x_irq_pending(struct pca953x_chip *chip)
 	old_stat = chip->irq_stat;
 	trigger = (cur_stat ^ old_stat) & chip->irq_mask;
 
-	if (!trigger)
-		return 0;
+	//if (!trigger)
+	//	return 0;
 
 	chip->irq_stat = cur_stat;
 
 	pending = (old_stat & chip->irq_trig_fall) |
 		  (cur_stat & chip->irq_trig_raise);
 	pending &= trigger;
+
+	pending |= (old_stat & cur_stat) & chip->irq_trig_high;
+	pending |= ~(old_stat | cur_stat) & chip->irq_trig_low;
 
 	return pending;
 }
@@ -474,12 +490,16 @@ static int pca953x_irq_setup(struct pca953x_chip *chip,
 		 * this purpose.
 		 */
 		chip->irq_stat &= chip->reg_direction;
-		chip->irq_base = pdata->irq_base;
 		mutex_init(&chip->irq_lock);
+
+		chip->irq_base = irq_alloc_descs(-1, pdata->irq_base, chip->gpio_chip.ngpio, -1);
+		if (chip->irq_base < 0)
+			goto out_failed;
 
 		for (lvl = 0; lvl < chip->gpio_chip.ngpio; lvl++) {
 			int irq = lvl + chip->irq_base;
 
+			irq_clear_status_flags(irq, IRQ_NOREQUEST);
 			irq_set_chip_data(irq, chip);
 			irq_set_chip(irq, &pca953x_irq_chip);
 			irq_set_nested_thread(irq, true);
@@ -493,8 +513,7 @@ static int pca953x_irq_setup(struct pca953x_chip *chip,
 		ret = request_threaded_irq(client->irq,
 					   NULL,
 					   pca953x_irq_handler,
-					   IRQF_TRIGGER_RISING |
-					   IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+					   IRQF_TRIGGER_LOW | IRQF_ONESHOT,
 					   dev_name(&client->dev), chip);
 		if (ret) {
 			dev_err(&client->dev, "failed to request irq %d\n",
@@ -514,8 +533,10 @@ out_failed:
 
 static void pca953x_irq_teardown(struct pca953x_chip *chip)
 {
-	if (chip->irq_base != -1)
+	if (chip->irq_base != -1) {
+		irq_free_descs(chip->irq_base, chip->gpio_chip.ngpio);
 		free_irq(chip->client->irq, chip);
+	}
 }
 #else /* CONFIG_GPIO_PCA953X_IRQ */
 static int pca953x_irq_setup(struct pca953x_chip *chip,
