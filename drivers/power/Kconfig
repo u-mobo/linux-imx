@@ -257,4 +257,11 @@ config BATTERY_DA9052
 	  Say Y here to enable support for batteries charger integrated into
 	  DA9052 PMIC.
 
+config BATTERY_ID95APM
+        tristate "ID95APM PMU support"
+        depends on MFD_ID95APM
+        help
+          Say Y here to enable support for the power management unit
+	  provided by the IDT ID95APM PMIC.
+
 endif # POWER_SUPPLY
