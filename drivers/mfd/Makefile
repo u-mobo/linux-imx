@@ -98,6 +98,8 @@ da9052-objs			:= da9052-spi.o da9052-i2c.o da9052-core.o
 obj-$(CONFIG_PMIC_DIALOG)	+= da9052.o
 #endif
 
+obj-$(CONFIG_MFD_ID95APM)	+= id95apm.o
+
 obj-$(CONFIG_MFD_OMAP_USB_HOST)	+= omap-usb-host.o
 obj-$(CONFIG_MFD_PM8921_CORE) 	+= pm8921-core.o
 obj-$(CONFIG_MFD_PM8XXX_IRQ) 	+= pm8xxx-irq.o
