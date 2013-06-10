@@ -327,6 +327,13 @@ config BACKLIGHT_PCF50633
 	  If you have a backlight driven by a NXP PCF50633 MFD, say Y here to
 	  enable its driver.
 
+config BACKLIGHT_ID95APM
+	tristate "ID95APM PMIC Backlight Driver"
+	depends on BACKLIGHT_CLASS_DEVICE && MFD_ID95APM
+	help
+	  If you have a backlight driven by the ISINK and DCDC of a
+	  ID95APM PMIC say y to enable the backlight driver for it.
+
 config BACKLIGHT_DA9052
 	tristate "Dialog DA9052 WLED"
 	depends on PMIC_DIALOG
