@@ -106,8 +106,11 @@ static int __devinit create_gpio_led(const struct gpio_led *template,
 	}
 
 	ret = gpio_request(template->gpio, template->name);
-	if (ret < 0)
-		return ret;
+	if (ret < 0) {
+		printk(KERN_INFO "Skipping LED gpio %d (%s) with error %d\n",
+				template->gpio, template->name, ret);
+		return 0;
+	}
 
 	led_dat->cdev.name = template->name;
 	led_dat->cdev.default_trigger = template->default_trigger;
