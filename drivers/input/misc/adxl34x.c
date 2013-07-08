@@ -181,6 +181,25 @@
 #define AC_READ(ac, reg)	((ac)->bops->read((ac)->dev, reg))
 #define AC_WRITE(ac, reg, val)	((ac)->bops->write((ac)->dev, reg, val))
 
+static int output_data_poll_us[] = {
+	313,		/* 3200 Hz */
+	625,		/* 1600 Hz */
+	1250,		/*  800 Hz */
+	2500,		/*  400 Hz */
+	5000,		/*  200 Hz */
+	10000,		/*  100 Hz */
+	20000,		/*   50 Hz */
+	40000,		/*   25 Hz */
+	80000,		/* 12.5 Hz */
+	160000,		/* 6.25 Hz */
+	319489,		/* 3.13 Hz */
+	641026,		/* 1.56 Hz */
+	1282051,	/* 0.78 Hz */
+	2564103,	/* 0.39 Hz */
+	5000000,	/* 0.20 Hz */
+	10000000,	/* 0.10 Hz */
+};
+
 struct axis_triple {
 	int x;
 	int y;
@@ -288,7 +307,7 @@ static void adxl34x_send_key_events(struct adxl34x *ac,
 	int i;
 
 	for (i = ADXL_X_AXIS; i <= ADXL_Z_AXIS; i++) {
-		if (status & (1 << (ADXL_Z_AXIS - i)))
+		if (pdata->ev_code_tap[i] && (status & (1 << (ADXL_Z_AXIS - i))))
 			input_report_key(ac->input,
 					 pdata->ev_code_tap[i], press);
 	}
@@ -444,6 +463,120 @@ void adxl34x_resume(struct adxl34x *ac)
 	mutex_unlock(&ac->mutex);
 }
 EXPORT_SYMBOL_GPL(adxl34x_resume);
+
+static ssize_t adxl34x_enable_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct adxl34x *ac = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%u\n", !ac->disabled);
+}
+
+static ssize_t adxl34x_enable_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	struct adxl34x *ac = dev_get_drvdata(dev);
+	unsigned long val;
+	int error;
+
+	error = strict_strtoul(buf, 10, &val);
+	if (error)
+		return error;
+
+	val = !val;	/* keep using disable logic */
+
+	mutex_lock(&ac->mutex);
+
+	if (!ac->suspended && ac->opened) {
+		if (val) {
+			if (!ac->disabled)
+				__adxl34x_disable(ac);
+		} else {
+			if (ac->disabled)
+				__adxl34x_enable(ac);
+		}
+	}
+
+	ac->disabled = !!val;
+
+	mutex_unlock(&ac->mutex);
+
+	return count;
+}
+
+static DEVICE_ATTR(enable, 0664, adxl34x_enable_show, adxl34x_enable_store);
+
+static ssize_t adxl34x_poll_min_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (output_data_poll_us[0] + 500) / 1000);
+}
+
+static DEVICE_ATTR(min, 0444, adxl34x_poll_min_show, NULL);
+
+static ssize_t adxl34x_poll_max_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (output_data_poll_us[15] + 500) / 1000);
+}
+
+static DEVICE_ATTR(max, 0444, adxl34x_poll_max_show, NULL);
+
+static ssize_t adxl34x_poll_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct adxl34x *ac = dev_get_drvdata(dev);
+	int i = RATE(ac->pdata.data_rate);
+
+	return sprintf(buf, "%d\n", (output_data_poll_us[i] + 500) / 1000);
+}
+
+static ssize_t adxl34x_poll_store(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct adxl34x *ac = dev_get_drvdata(dev);
+	unsigned long val;
+	int error, i = 0;
+
+	error = strict_strtoul(buf, 10, &val);
+	if (error)
+		return error;
+
+	val *= 1000;	/* we use us */
+
+	while ((output_data_poll_us[i] < val) && (i < 15))
+		i++;
+
+	if (output_data_poll_us[i] > val)
+		i--;
+
+	mutex_lock(&ac->mutex);
+
+	ac->pdata.data_rate = RATE(i);
+	AC_WRITE(ac, BW_RATE,
+		 ac->pdata.data_rate |
+			(ac->pdata.low_power_mode ? LOW_POWER : 0));
+
+	mutex_unlock(&ac->mutex);
+
+	return count;
+}
+
+static DEVICE_ATTR(poll, 0664, adxl34x_poll_show, adxl34x_poll_store);
+
+static struct attribute *adxl34x_input_attributes[] = {
+	&dev_attr_enable.attr,
+	&dev_attr_min.attr,
+	&dev_attr_max.attr,
+	&dev_attr_poll.attr,
+	NULL
+};
+
+static const struct attribute_group adxl34x_input_attr_group = {
+	.attrs = adxl34x_input_attributes,
+};
 
 static ssize_t adxl34x_disable_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
@@ -833,6 +966,10 @@ struct adxl34x *adxl34x_probe(struct device *dev, int irq,
 	if (err)
 		goto err_remove_attr;
 
+	err = sysfs_create_group(&input_dev->dev.kobj, &adxl34x_input_attr_group);
+	if (err)
+		goto err_unregister_input_dev;
+
 	AC_WRITE(ac, THRESH_TAP, pdata->tap_threshold);
 	AC_WRITE(ac, OFSX, pdata->x_axis_offset);
 	ac->hwcal.x = pdata->x_axis_offset;
@@ -892,6 +1029,8 @@ struct adxl34x *adxl34x_probe(struct device *dev, int irq,
 
 	return ac;
 
+ err_unregister_input_dev:
+	input_unregister_device(input_dev);
  err_remove_attr:
 	sysfs_remove_group(&dev->kobj, &adxl34x_attr_group);
  err_free_irq:
@@ -907,6 +1046,7 @@ EXPORT_SYMBOL_GPL(adxl34x_probe);
 int adxl34x_remove(struct adxl34x *ac)
 {
 	sysfs_remove_group(&ac->dev->kobj, &adxl34x_attr_group);
+	sysfs_remove_group(&ac->input->dev.kobj, &adxl34x_input_attr_group);
 	free_irq(ac->irq, ac);
 	input_unregister_device(ac->input);
 	dev_dbg(ac->dev, "unregistered accelerometer\n");
