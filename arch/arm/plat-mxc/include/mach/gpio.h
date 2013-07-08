@@ -21,6 +21,10 @@
 
 #include <linux/spinlock.h>
 #include <mach/hardware.h>
+#include <mach/irqs.h>
+
+#define ARCH_NR_GPIOS          (MXC_GPIO_IRQS + MXC_BOARD_IRQS)
+
 #include <asm-generic/gpio.h>
 
 
