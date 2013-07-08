@@ -131,13 +131,13 @@ static ssize_t mpl3115_enable_store(struct device *dev,
 		ret = mpl3115_i2c_write(client, MPL3115_CTRL_REG1, &val, 1);
 		if (!ret)
 			pdata->active = MPL_ACTIVED;
-		printk("mpl3115 set active\n");
+		//printk("mpl3115 set active\n");
 	} else if (!enable && pdata->active == MPL_ACTIVED) {
 		val &= ~MPLL_ACTIVE_MASK;
 		ret = mpl3115_i2c_write(client, MPL3115_CTRL_REG1, &val, 1);
 		if (!ret)
 			pdata->active = MPL_STANDBY;
-		printk("mpl3115 set inactive\n");
+		//printk("mpl3115 set inactive\n");
 
 	}
 	mutex_unlock(&pdata->data_lock);
