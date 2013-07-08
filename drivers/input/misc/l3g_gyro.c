@@ -52,7 +52,16 @@
 *		|		|		  | changed to decimal
 * 1.2		| 2012/Jul/10	| Denis Ciocca	  | input_poll_dev removal
 * 1.2.1		| 2012/Jul/10	| Denis Ciocca	  | added high resolution timers
-* 1.2.1+	| 2012/Dec/18	| P. Passaro	  | added temperature support
+* 1.2.1.1	| 2012/Dec/18	| P. Passaro	  | added temperature support
+* 1.2.1.2	| 2013/Jul/40	| P. Passaro	  | removed hrtimers
+*		|		|		  | removed irq2 work queue
+*		|		|		  | removed polling task
+*		|		|		  | added data delayed work
+*		|		|		  | added automatic polling
+*		|		|		  |  mode management
+*		|		|		  | fixed features management
+*		|		|		  | added support to FSL Android
+*		|		|		  |  BSP standard for sensors
 *******************************************************************************/
 
 #include <linux/i2c.h>
@@ -187,8 +196,8 @@ struct output_rate {
 };
 
 static const struct output_rate odr_table[] = {
-	{	2,	ODR800|BW10},
-	{	3,	ODR400|BW01},
+	{	1,	ODR800|BW10},
+	{	2,	ODR400|BW01},
 	{	5,	ODR200|BW00},
 	{	10,	ODR100|BW00},
 };
@@ -216,8 +225,6 @@ static struct l3g_gyro_platform_data default_l3g_gyro_pdata = {
 
 };
 
-struct workqueue_struct *l3g_gyro_workqueue = 0;
-
 struct l3g_gyro_status {
 	struct i2c_client *client;
 	struct l3g_gyro_platform_data *pdata;
@@ -239,17 +246,14 @@ struct l3g_gyro_status {
 
 	/* interrupt related */
 	int irq2;
-	struct work_struct irq2_work;
-	struct workqueue_struct *irq2_work_queue;
+	struct delayed_work data_work;
 
 	bool polling_enabled;
 	/* fifo related */
 	u8 watermark;
 	u8 fifomode;
 
-	struct hrtimer hr_timer;
-	ktime_t ktime;
-	struct work_struct polling_task;
+	u16 features;
 };
 
 static int l3g_gyro_i2c_read(struct l3g_gyro_status *stat, u8 *buf, int len)
@@ -351,7 +355,6 @@ static int l3g_gyro_register_update(struct l3g_gyro_status *stat, u8 *buf,
 	}
 	return err;
 }
-
 
 static int l3g_gyro_update_watermark(struct l3g_gyro_status *stat, u8 watermark)
 {
@@ -607,11 +610,17 @@ static int l3g_gyro_selftest(struct l3g_gyro_status *stat, u8 enable)
 	return err;
 }
 
+static int l3g_gyro_enable_low_odr(struct l3g_gyro_status *stat, unsigned int enable);
+
 static int l3g_gyro_update_odr(struct l3g_gyro_status *stat, unsigned int poll_interval_ms)
 {
 	int err = -1;
 	int i;
 	u8 config[2];
+	unsigned int odr_interval_ms, poll_enable;
+
+	if (stat->features & L3G_GYRO_LOW_ODR)
+		l3g_gyro_enable_low_odr(stat, (poll_interval_ms >= 20));
 
 	if(!atomic_read(&stat->low_odr_enabled)) {
 		for(i = ARRAY_SIZE(odr_table) - 1; i >= 0; i--) {
@@ -619,15 +628,28 @@ static int l3g_gyro_update_odr(struct l3g_gyro_status *stat, unsigned int poll_i
 				break;
 		}
 		config[1] = odr_table[i].mask;
+		odr_interval_ms = odr_table[i].poll_rate_ms;
 	} else {
 		for(i = ARRAY_SIZE(odr_table_low_odr) - 1; i >= 0; i--) {
 			if(odr_table_low_odr[i].poll_rate_ms <= poll_interval_ms)
 				break;
 		}
 		config[1] = odr_table_low_odr[i].mask;
+		odr_interval_ms = odr_table_low_odr[i].poll_rate_ms;
 	}
 	config[1] = odr_table[i].mask;
 	config[1] |= (ENABLE_ALL_AXES + PM_NORMAL);
+
+	if ((2 * odr_interval_ms > poll_interval_ms) && (stat->irq2)) {
+		poll_interval_ms = odr_interval_ms;
+		poll_enable = false;
+	} else {
+		poll_enable = true;
+	}
+	if (stat->polling_enabled != poll_enable) {
+		stat->polling_enabled = poll_enable;
+		l3g_gyro_manage_int2settings(stat, stat->fifomode);
+	}
 
 	/* If device is currently enabled, we need to write new
 	 *  configuration out to it */
@@ -637,8 +659,11 @@ static int l3g_gyro_update_odr(struct l3g_gyro_status *stat, unsigned int poll_i
 		if (err < 0)
 			return err;
 		stat->resume_state[RES_CTRL_REG1] = config[1];
-		stat->ktime = ktime_set(0, MS_TO_NS(poll_interval_ms));
+
+		if (stat->polling_enabled)
+			schedule_delayed_work(&stat->data_work, 0);
 	}
+	stat->pdata->poll_interval = poll_interval_ms;
 
 	return err;
 }
@@ -777,6 +802,7 @@ static int l3g_gyro_device_power_on(struct l3g_gyro_status *stat)
 {
 	int err;
 
+	dev_dbg(&stat->client->dev, "power on\n");
 	if (stat->pdata->power_on) {
 		err = stat->pdata->power_on();
 		if (err < 0)
@@ -823,10 +849,8 @@ static int l3g_gyro_enable(struct l3g_gyro_status *stat)
 		}
 
 		if (stat->polling_enabled) {
-			hrtimer_start(&(stat->hr_timer), stat->ktime,
-							HRTIMER_MODE_REL);
+			schedule_delayed_work(&stat->data_work, 0);
 		}
-
 	}
 
 	return 0;
@@ -839,8 +863,8 @@ static int l3g_gyro_disable(struct l3g_gyro_status *stat)
 
 	if (atomic_cmpxchg(&stat->enabled, 1, 0)) {
 		l3g_gyro_device_power_off(stat);
-		hrtimer_cancel(&stat->hr_timer);
-		dev_dbg(&stat->client->dev, "%s: cancel_hrtimer ", __func__);
+		cancel_delayed_work_sync(&stat->data_work);
+		dev_dbg(&stat->client->dev, "%s: cancel_delayed_work_sync1n", __func__);
 	}
 	return 0;
 }
@@ -861,7 +885,6 @@ static ssize_t attr_polling_rate_store(struct device *dev,
 				     struct device_attribute *attr,
 				     const char *buf, size_t size)
 {
-	int err;
 	struct l3g_gyro_status *stat = dev_get_drvdata(dev);
 	unsigned long interval_ms;
 
@@ -871,9 +894,7 @@ static ssize_t attr_polling_rate_store(struct device *dev,
 		return -EINVAL;
 
 	mutex_lock(&stat->lock);
-	err = l3g_gyro_update_odr(stat, interval_ms);
-	if(err >= 0)
-		stat->pdata->poll_interval = interval_ms;
+	l3g_gyro_update_odr(stat, interval_ms);
 	mutex_unlock(&stat->lock);
 	return size;
 }
@@ -968,6 +989,10 @@ static ssize_t attr_get_selftest(struct device *dev,
 {
 	int val;
 	struct l3g_gyro_status *stat = dev_get_drvdata(dev);
+
+	if (!(stat->features & L3G_GYRO_SELF_TEST))
+		return sprintf(buf, "feature not supported\n");
+
 	mutex_lock(&stat->lock);
 	val = stat->selftest_enabled;
 	mutex_unlock(&stat->lock);
@@ -980,6 +1005,9 @@ static ssize_t attr_set_selftest(struct device *dev,
 {
 	struct l3g_gyro_status *stat = dev_get_drvdata(dev);
 	unsigned long val;
+
+	if (!(stat->features & L3G_GYRO_SELF_TEST))
+		return -EPERM;	/* feature not supported */
 
 	if (strict_strtoul(buf, 10, &val))
 		return -EINVAL;
@@ -1047,11 +1075,11 @@ static ssize_t attr_polling_mode_store(struct device *dev,
 		l3g_gyro_manage_int2settings(stat, stat->fifomode);
 		dev_dbg(dev, "polling mode enabled\n");
 		if (atomic_read(&stat->enabled)) {
-			hrtimer_start(&(stat->hr_timer), stat->ktime, HRTIMER_MODE_REL);
+			schedule_delayed_work(&stat->data_work, 0);
 		}
 	} else {
 		if (stat->polling_enabled) {
-			hrtimer_cancel(&stat->hr_timer);
+			cancel_delayed_work_sync(&stat->data_work);
 		}
 		stat->polling_enabled = false;
 		l3g_gyro_manage_int2settings(stat, stat->fifomode);
@@ -1124,6 +1152,10 @@ static ssize_t attr_get_low_odr(struct device *dev,
 {
 	struct l3g_gyro_status *stat = dev_get_drvdata(dev);
 	int val = atomic_read(&stat->low_odr_enabled);
+
+	if (!(stat->features & L3G_GYRO_LOW_ODR))
+		return sprintf(buf, "feature not supported\n");
+
 	return sprintf(buf, "%d\n", val);
 }
 
@@ -1134,6 +1166,9 @@ static ssize_t attr_set_low_odr(struct device *dev,
 	struct l3g_gyro_status *stat = dev_get_drvdata(dev);
 	unsigned long enable;
 	int res;
+
+	if (!(stat->features & L3G_GYRO_LOW_ODR))
+		return -EPERM;	/* feature not supported */
 
 	if (strict_strtoul(buf, 10, &enable))
 		return -EINVAL;
@@ -1220,6 +1255,35 @@ static struct device_attribute attributes[] = {
 	__ATTR(reg_value, 0600, attr_reg_get, attr_reg_set),
 	__ATTR(reg_addr, 0200, NULL, attr_addr_set),
 #endif
+};
+
+static ssize_t attr_poll_min_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "1\n");
+}
+
+static ssize_t attr_poll_max_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "1000\n");
+}
+
+static DEVICE_ATTR(enable, 0664, attr_enable_show, attr_enable_store);
+static DEVICE_ATTR(min, 0444, attr_poll_min_show, NULL);
+static DEVICE_ATTR(max, 0444, attr_poll_max_show, NULL);
+static DEVICE_ATTR(poll, 0664, attr_polling_rate_show, attr_polling_rate_store);
+
+static struct attribute *input_attributes[] = {
+	&dev_attr_enable.attr,
+	&dev_attr_min.attr,
+	&dev_attr_max.attr,
+	&dev_attr_poll.attr,
+	NULL
+};
+
+static const struct attribute_group input_attribute_group = {
+	.attrs = input_attributes,
 };
 
 static int create_sysfs_interfaces(struct device *dev)
@@ -1332,28 +1396,37 @@ static irqreturn_t l3g_gyro_isr2(int irq, void *dev)
 {
 	struct l3g_gyro_status *stat = dev;
 
+	if (stat->polling_enabled)
+		return IRQ_HANDLED;
+
 	disable_irq_nosync(irq);
 #ifdef DEBUG
 	input_report_abs(stat->input_dev, ABS_MISC, 2);
-	input_sync(stat->input_dev->input);
+	input_sync(stat->input_dev);
 #endif
-	queue_work(stat->irq2_work_queue, &stat->irq2_work);
-	pr_debug("%s %s: isr2 queued\n", L3G_GYRO_DEV_NAME, __func__);
+	schedule_delayed_work(&stat->data_work, 0);
+	pr_debug("%s %s: isr2 work scheduled\n", L3G_GYRO_DEV_NAME, __func__);
 
 	return IRQ_HANDLED;
 }
 
-static void l3g_gyro_irq2_work_func(struct work_struct *work)
+static void l3g_gyro_data_work_func(struct work_struct *work)
 {
-	struct l3g_gyro_status *stat =
-		container_of(work, struct l3g_gyro_status, irq2_work);
-	/* TODO  add interrupt service procedure.
-		 ie:l3g_gyro_irq2_XXX(stat); */
+	struct delayed_work *dw = container_of(work, struct delayed_work, work);
+	struct l3g_gyro_status *stat = container_of(dw, struct l3g_gyro_status, data_work);
+
+	if (!stat->hw_initialized)
+		return;
+
 	l3g_gyro_irq2_fifo(stat);
-	/*  */
-	pr_debug("%s %s: IRQ2 served\n", L3G_GYRO_DEV_NAME, __func__);
-/* exit: */
-	enable_irq(stat->irq2);
+
+	if (stat->polling_enabled) {
+		schedule_delayed_work(&stat->data_work,
+		      msecs_to_jiffies(stat->pdata->poll_interval));
+	} else {
+		pr_debug("%s %s: IRQ2 served\n", L3G_GYRO_DEV_NAME, __func__);
+		enable_irq(stat->irq2);
+	}
 }
 
 int l3g_gyro_input_open(struct input_dev *input)
@@ -1450,8 +1523,17 @@ static int l3g_gyro_input_init(struct l3g_gyro_status *stat)
 		goto err1;
 	}
 
+	err = sysfs_create_group(&stat->input_dev->dev.kobj, &input_attribute_group);
+	if (err < 0) {
+		dev_err(&stat->client->dev,
+			"%s input sysfs_create_group failed\n", L3G_GYRO_DEV_NAME);
+		goto err2;
+	}
+
 	return 0;
 
+err2:
+	input_unregister_device(stat->input_dev);
 err1:
 	input_free_device(stat->input_dev);
 err0:
@@ -1460,37 +1542,9 @@ err0:
 
 static void l3g_gyro_input_cleanup(struct l3g_gyro_status *stat)
 {
+	sysfs_remove_group(&stat->input_dev->dev.kobj, &input_attribute_group);
 	input_unregister_device(stat->input_dev);
 	input_free_device(stat->input_dev);
-}
-
-static void poll_function_work(struct work_struct *polling_task)
-{
-	struct l3g_gyro_status *stat;
-	struct l3g_gyro_triple data_out;
-	int err;
-
-	stat = container_of((struct work_struct *)polling_task,
-					struct l3g_gyro_status, polling_task);
-
-	err = l3g_gyro_get_data(stat, &data_out);
-	if (err < 0)
-		dev_err(&stat->client->dev, "get_rotation_data failed.\n");
-	else
-		l3g_gyro_report_values(stat, &data_out);
-
-	hrtimer_start(&stat->hr_timer, stat->ktime, HRTIMER_MODE_REL);
-}
-
-enum hrtimer_restart poll_function_read(struct hrtimer *timer)
-{
-	struct l3g_gyro_status *stat;
-
-	stat = container_of((struct hrtimer *)timer,
-				struct l3g_gyro_status, hr_timer);
-
-	queue_work(l3g_gyro_workqueue, &stat->polling_task);
-	return HRTIMER_NORESTART;
 }
 
 static int l3g_gyro_probe(struct i2c_client *client,
@@ -1517,11 +1571,7 @@ static int l3g_gyro_probe(struct i2c_client *client,
 		goto err0;
 	}
 
-	if(l3g_gyro_workqueue == 0)
-		l3g_gyro_workqueue = create_workqueue("l3g_gyro_workqueue");
-
-	hrtimer_init(&stat->hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	stat->hr_timer.function = &poll_function_read;
+	INIT_DELAYED_WORK(&stat->data_work, l3g_gyro_data_work_func);
 
 	mutex_init(&stat->lock);
 	mutex_lock(&stat->lock);
@@ -1540,6 +1590,11 @@ static int l3g_gyro_probe(struct i2c_client *client,
 			"failed to identify %s(0x%x): err %d, id 0x%x\n", devid->name, (int)devid->driver_data, err, id);
 		goto err1_1;
 	}
+
+	stat->features = devid->driver_data;
+
+	if (stat->features & L3G_GYRO_LOW_ODR)
+		l3g_gyro_enable_low_odr(stat, 1);
 
 	if (client->dev.platform_data == NULL) {
 		default_l3g_gyro_pdata.gpio_int1 = int1_gpio;
@@ -1624,39 +1679,26 @@ static int l3g_gyro_probe(struct i2c_client *client,
 			L3G_GYRO_DEV_NAME, __func__, stat->irq2,
 							stat->pdata->gpio_int2);
 
-		INIT_WORK(&stat->irq2_work, l3g_gyro_irq2_work_func);
-		stat->irq2_work_queue =
-			create_singlethread_workqueue("l3g_gyro_irq2_wq");
-		if (!stat->irq2_work_queue) {
-			err = -ENOMEM;
-			dev_err(&client->dev, "cannot create "
-						"work queue2: %d\n", err);
-			goto err5;
-		}
-
 		err = request_threaded_irq(stat->irq2, NULL, l3g_gyro_isr2,
 				IRQF_TRIGGER_HIGH, "l3g_gyro_irq2", stat);
 
 		if (err < 0) {
 			dev_err(&client->dev, "request irq2 failed: %d\n", err);
-			goto err6;
+			goto err5;
 		}
 		disable_irq_nosync(stat->irq2);
+		stat->polling_enabled = false;
+		dev_dbg(&client->dev, "polling mode disabled\n");
 	}
+	l3g_gyro_manage_int2settings(stat, stat->fifomode);
 
 	mutex_unlock(&stat->lock);
 
-	INIT_WORK(&stat->polling_task, poll_function_work);
 	dev_dbg(&client->dev, "%s probed: device created successfully\n",
 							L3G_GYRO_DEV_NAME);
 
 	return 0;
 
-/*err7:
-	free_irq(stat->irq2, stat);
-*/
-err6:
-	destroy_workqueue(stat->irq2_work_queue);
 err5:
 	l3g_gyro_device_power_off(stat);
 	remove_sysfs_interfaces(&client->dev);
@@ -1671,7 +1713,6 @@ err1_1:
 	mutex_unlock(&stat->lock);
 	kfree(stat->pdata);
 err1:
-	destroy_workqueue(l3g_gyro_workqueue);
 	kfree(stat);
 err0:
 
@@ -1685,11 +1726,6 @@ static int l3g_gyro_remove(struct i2c_client *client)
 
 	dev_dbg(&stat->client->dev, "driver removing\n");
 
-	cancel_work_sync(&stat->polling_task);
-	if(!l3g_gyro_workqueue) {
-		flush_workqueue(l3g_gyro_workqueue);
-		destroy_workqueue(l3g_gyro_workqueue);
-	}
 	/*
 	if (stat->irq1 > 0)
 	{
@@ -1701,14 +1737,13 @@ static int l3g_gyro_remove(struct i2c_client *client)
 	if (stat->irq2 > 0) {
 		free_irq(stat->irq2, stat);
 		gpio_free(stat->pdata->gpio_int2);
-		destroy_workqueue(stat->irq2_work_queue);
 	}
 
 	l3g_gyro_disable(stat);
 	l3g_gyro_input_cleanup(stat);
 
 	remove_sysfs_interfaces(&client->dev);
-
+	cancel_delayed_work_sync(&stat->data_work);
 	kfree(stat->pdata);
 	kfree(stat);
 	return 0;
@@ -1730,7 +1765,7 @@ static int l3g_gyro_suspend(struct device *dev)
 		mutex_lock(&stat->lock);
 		if (stat->polling_enabled) {
 			dev_dbg(&stat->client->dev, "polling mode disabled\n");
-			hrtimer_cancel(&stat->hr_timer);
+			cancel_delayed_work_sync(&stat->data_work);
 		}
 #ifdef SLEEP
 		err = l3g_gyro_register_update(stat, buf, CTRL_REG1,
@@ -1761,8 +1796,7 @@ static int l3g_gyro_resume(struct device *dev)
 		mutex_lock(&stat->lock);
 		if (stat->polling_enabled) {
 			dev_dbg(&stat->client->dev, "polling mode enabled\n");
-			hrtimer_init(&stat->hr_timer, CLOCK_MONOTONIC,
-							HRTIMER_MODE_REL);
+			schedule_delayed_work(&stat->data_work, 0);
 		}
 #ifdef SLEEP
 		err = l3g_gyro_register_update(stat, buf, CTRL_REG1,
