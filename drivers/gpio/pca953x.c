@@ -434,8 +434,8 @@ static uint16_t pca953x_irq_pending(struct pca953x_chip *chip)
 		  (cur_stat & chip->irq_trig_raise);
 	pending &= trigger;
 
-	pending |= (old_stat & cur_stat) & chip->irq_trig_high;
-	pending |= ~(old_stat | cur_stat) & chip->irq_trig_low;
+	pending |= (cur_stat & chip->irq_trig_high);
+	pending |= (~cur_stat & chip->irq_trig_low);
 
 	return pending;
 }
@@ -456,6 +456,8 @@ static irqreturn_t pca953x_irq_handler(int irq, void *devid)
 		handle_nested_irq(level + chip->irq_base);
 
 		pending &= ~(1 << level);
+		//if (!pending && (chip->irq_trig_high | chip->irq_trig_low))
+		//	pending = pca953x_irq_pending(chip);
 	} while (pending);
 
 	return IRQ_HANDLED;
