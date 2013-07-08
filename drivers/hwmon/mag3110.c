@@ -187,8 +187,8 @@ static int mag3110_read_data(short *x, short *y, short *z)
 	u8 tmp_data[MAG3110_XYZ_DATA_LEN];
 #if !MAG3110_IRQ_USED
 	int retry = 3;
-	int result;
 #endif
+	int result;
 
 	if (!mag3110_pdata || mag3110_pdata->active == MAG_STANDBY)
 		return -EINVAL;
@@ -199,7 +199,11 @@ static int mag3110_read_data(short *x, short *y, short *z)
 			(data->waitq, data->data_ready != 0,
 			 msecs_to_jiffies(INT_TIMEOUT))) {
 		dev_dbg(&data->client->dev, "interrupt not received\n");
-		return -ETIME;
+		result = i2c_smbus_read_byte_data(data->client,
+				MAG3110_DR_STATUS);
+		if (!(result & MAG3110_STATUS_ZYXDR))
+			return -ETIME;
+		dev_dbg(&data->client->dev, "... but data ready!?\n");
 	}
 #else
 	do {
