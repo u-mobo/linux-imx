@@ -31,6 +31,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_CX20442
 	select SND_SOC_DA7210 if I2C
 	select SND_SOC_DFBMCS320
+	select SND_SOC_ID95APM if MFD_ID95APM
 	select SND_SOC_JZ4740_CODEC if SOC_JZ4740
 	select SND_SOC_LM4857 if I2C
 	select SND_SOC_CS42888 if I2C
@@ -176,6 +177,10 @@ config SND_SOC_CS4271
 
 config SND_SOC_CX20442
 	tristate
+
+config SND_SOC_ID95APM
+	tristate
+	depends on MFD_ID95APM
 
 config SND_SOC_JZ4740_CODEC
 	tristate
