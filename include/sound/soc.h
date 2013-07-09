@@ -460,6 +460,7 @@ struct snd_soc_jack_gpio {
 	int invert;
 	int debounce_time;
 	bool wake;
+	int polling_time;
 
 	struct snd_soc_jack *jack;
 	struct delayed_work work;

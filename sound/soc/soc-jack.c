@@ -279,6 +279,9 @@ static void gpio_work(struct work_struct *work)
 
 	gpio = container_of(work, struct snd_soc_jack_gpio, work.work);
 	snd_soc_jack_gpio_detect(gpio);
+	if (gpio->polling_time > 0)
+		schedule_delayed_work(&gpio->work,
+				      msecs_to_jiffies(gpio->polling_time));
 }
 
 /**
@@ -321,21 +324,26 @@ int snd_soc_jack_add_gpios(struct snd_soc_jack *jack, int count,
 		INIT_DELAYED_WORK(&gpios[i].work, gpio_work);
 		gpios[i].jack = jack;
 
-		ret = request_any_context_irq(gpio_to_irq(gpios[i].gpio),
-					      gpio_handler,
-					      IRQF_TRIGGER_RISING |
-					      IRQF_TRIGGER_FALLING,
-					      gpios[i].name,
-					      &gpios[i]);
-		if (ret < 0)
-			goto err;
+		if (gpios[i].polling_time > 0) {
+			schedule_delayed_work(&gpios[i].work,
+					      msecs_to_jiffies(gpios[i].polling_time));
+		} else {
+			ret = request_any_context_irq(gpio_to_irq(gpios[i].gpio),
+						      gpio_handler,
+						      IRQF_TRIGGER_RISING |
+						      IRQF_TRIGGER_FALLING,
+						      gpios[i].name,
+						      &gpios[i]);
+			if (ret < 0)
+				goto err;
 
-		if (gpios[i].wake) {
-			ret = irq_set_irq_wake(gpio_to_irq(gpios[i].gpio), 1);
-			if (ret != 0)
-				printk(KERN_ERR
-				  "Failed to mark GPIO %d as wake source: %d\n",
-					gpios[i].gpio, ret);
+			if (gpios[i].wake) {
+				ret = irq_set_irq_wake(gpio_to_irq(gpios[i].gpio), 1);
+				if (ret != 0)
+					printk(KERN_ERR
+					  "Failed to mark GPIO %d as wake source: %d\n",
+						gpios[i].gpio, ret);
+			}
 		}
 
 #ifdef CONFIG_GPIO_SYSFS
