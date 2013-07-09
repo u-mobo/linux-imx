@@ -15,6 +15,7 @@ obj-$(CONFIG_MACH_MX51_BABBAGE) += board-mx51_babbage.o mx51_babbage_pmic_mc1389
 obj-$(CONFIG_MACH_MX51_3DS) += board-mx51_3ds.o
 obj-$(CONFIG_MACH_MX53_EVK) += board-mx53_evk.o
 obj-$(CONFIG_MACH_MX53_SMD) += board-mx53_smd.o pm_i2c.o pm_da9053.o mx53_smd_pmic_da9053.o
+obj-$(CONFIG_MACH_MX53_UMOBO) += board-mx53_umobo.o pm_i2c.o pm_da9053.o mx53_umobo_pmic_da9053.o mx53_umobo_msp430.o
 obj-$(CONFIG_MACH_IMX_BLUETOOTH_RFKILL) += imx_bt_rfkill.o
 obj-$(CONFIG_MACH_MX53_LOCO) += board-mx53_loco.o mx53_loco_pmic_da9053.o mx53_loco_pmic_mc34708.o
 obj-$(CONFIG_MACH_MX53_ARD) += board-mx53_ard.o
