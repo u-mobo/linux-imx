@@ -93,6 +93,24 @@
 #define CONV_RX			0x04
 #define CONV_RY			0x02
 
+/* cordinantes rate: higher nibble of CTRL0 register */
+#define RATE_MANUAL		0x00
+#define RATE_10CPS		0x01
+#define RATE_20CPS		0x02
+#define RATE_40CPS		0x03
+#define RATE_60CPS		0x04
+#define RATE_80CPS		0x05
+#define RATE_100CPS		0x06
+#define RATE_200CPS		0x07
+#define RATE_300CPS		0x08
+#define RATE_400CPS		0x09
+#define RATE_500CPS		0x0a
+#define RATE_1000CPS		0x0b
+#define RATE_2000CPS		0x0c
+#define RATE_3000CPS		0x0d
+#define RATE_4000CPS		0x0e
+#define RATE_5000CPS		0x0f
+
 /* power delay: lower nibble of CTRL0 register */
 #define POWDLY_IMMEDIATE	0x00
 #define POWDLY_1_1US		0x01
@@ -139,7 +157,6 @@ struct ts_event {
 
 struct sx865x {
 	struct input_dev *input;
-	struct hrtimer timer;
 	struct ts_event tc;
 
 	struct i2c_client *client;
@@ -427,21 +444,6 @@ static int sx865x_data_available(struct sx865x *ts)
 	return status & status_bit;
 }
 
-static enum hrtimer_restart sx865x_timer_handler(struct hrtimer *handle)
-{
-	struct sx865x *ts = container_of(handle, struct sx865x, timer);
-
-	if (sx865x_data_available(ts)) {
-		/* the interrupt has not yet been serviced */
-		hrtimer_forward_now(&ts->timer, ktime_set(0, TS_TIMEOUT));
-		return HRTIMER_RESTART;
-	}
-
-	sx865x_pen_up(ts);
-
-	return HRTIMER_NORESTART;
-}
-
 static void sx865x_pen_irq_worker(struct work_struct *work)
 {
 	struct sx865x *ts = container_of(work, struct sx865x, pen_event_work.work);
@@ -459,21 +461,13 @@ static void sx865x_pen_irq_worker(struct work_struct *work)
 			sx865x_pen_up(ts);
 	}
 
-	if (ts->irq) {
-		if (ts->pendown)
-			/* this timer upon expiration will indicate pen UP */
-			hrtimer_start(&ts->timer, ktime_set(0, TS_TIMEOUT), HRTIMER_MODE_REL);
-
-		enable_irq(ts->irq);
-	} else
+	if ((ts->irq == 0) || (ts->pendown))
 		queue_delayed_work(ts->ts_workq, &ts->pen_event_work, ts->scantime_jiffies);
 }
 
 static irqreturn_t sx865x_irq(int irq, void *handle)
 {
 	struct sx865x *ts = handle;
-
-	disable_irq(ts->irq);
 
 	/* the reading of the samples can be time-consuming if using
 	 * a slow i2c, so the work is done in a queue */
@@ -531,9 +525,6 @@ static int sx865x_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, ts);
 
 	ts->input = input_dev;
-
-	hrtimer_init(&ts->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	ts->timer.function = sx865x_timer_handler;
 
 	ts->features = id->driver_data;
 
@@ -621,7 +612,7 @@ static int sx865x_probe(struct i2c_client *client,
 	}
 
 	/* set POWDLY settling time -- adjust TS_TIMEOUT accordingly */
-	err = i2c_smbus_write_byte_data(client, I2C_REG_CTRL0, POWDLY_1_1MS);
+	err = i2c_smbus_write_byte_data(client, I2C_REG_CTRL0, POWDLY_1_1MS | (ts->irq ? RATE_100CPS : 0));
 	if (err != 0) {
 		dev_err(&client->dev, "writereg0 fail");
 		goto err_free_mem;
@@ -666,7 +657,6 @@ static int sx865x_probe(struct i2c_client *client,
  err_free_irq:
 	if (ts->irq)
 		free_irq(ts->irq, ts);
-	hrtimer_cancel(&ts->timer);
  err_free_mem:
 	input_free_device(input_dev);
 	kfree(ts);
@@ -685,7 +675,6 @@ static int sx865x_remove(struct i2c_client *client)
 
 	if (ts->irq)
 		free_irq(ts->irq, ts);
-	hrtimer_cancel(&ts->timer);
 	input_unregister_device(ts->input);
 	kfree(ts);
 
