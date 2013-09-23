@@ -10,6 +10,10 @@ struct sx865x_platform_data {
 	u16 y_plate_ohms;
 	u16 max_dx;
 	u16 max_dy;
+	u16 max_x;
+	u16 max_y;
+	u16 min_x;
+	u16 min_y;
 	u16 flags;
 };
 

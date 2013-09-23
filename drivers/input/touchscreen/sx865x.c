@@ -172,6 +172,8 @@ struct sx865x {
 	u16 y_plate_ohms;
 	u16 max_dx, min_rx;
 	u16 max_dy, min_ry;
+	u16 delta_x, max_x, min_x;
+	u16 delta_y, max_y, min_y;
 	u16 scantime_jiffies;
 
 	unsigned pendown;
@@ -388,8 +390,28 @@ static int sx865x_read_values(struct sx865x *ts)
 			ch = data >> 12;
 			if (ch == CH_X) {
 				ts->tc.x = data & 0xfff;
+				if (ts->delta_x) {
+					if (ts->tc.x < ts->min_x) {
+						ts->min_x = ts->tc.x;
+						ts->delta_x = ts->max_x - ts->min_x + 1;
+					} else if (ts->tc.x > ts->max_x) {
+						ts->max_x = ts->tc.x;
+						ts->delta_x = ts->max_x - ts->min_x + 1;
+					}
+					ts->tc.x = ((s32)(ts->tc.x - ts->min_x) << 12) / ts->delta_x;
+				}
 			} else if (ch == CH_Y) {
 				ts->tc.y = data & 0xfff;
+				if (ts->delta_y) {
+					if (ts->tc.y < ts->min_y) {
+						ts->min_y = ts->tc.y;
+						ts->delta_y = ts->max_y - ts->min_y + 1;
+					} else if (ts->tc.y > ts->max_y) {
+						ts->max_y = ts->tc.y;
+						ts->delta_y = ts->max_y - ts->min_y + 1;
+					}
+					ts->tc.y = ((s32)(ts->tc.y - ts->min_y) << 12) / ts->delta_y;
+				}
 			} else if (ch == CH_Z1) {
 				ts->tc.z1 = data & 0xfff;
 			} else if (ch == CH_Z2) {
@@ -408,6 +430,8 @@ static int sx865x_read_values(struct sx865x *ts)
 
 	dev_dbg(&ts->client->dev, "X:%d Y:%d Z1:%d Z2:%d RX:%d RY:%d\n",
 		ts->tc.x, ts->tc.y, ts->tc.z1, ts->tc.z2, ts->tc.rx, ts->tc.ry);
+	dev_dbg(&ts->client->dev, "minX:%d maxX:%d minY:%d maxY:%d\n",
+		ts->min_x, ts->max_x, ts->min_y, ts->max_y);
 
 	return !ts->tc.z1;	/* return 0 only if pressure not 0 */
 }
@@ -536,6 +560,10 @@ static int sx865x_probe(struct i2c_client *client,
 		ts->invert_x = pdata->flags & SX865X_INVERT_X;
 		ts->invert_y = pdata->flags & SX865X_INVERT_Y;
 		ts->swap_xy = pdata->flags & SX865X_SWAP_XY;
+		ts->min_x = pdata->min_x;
+		ts->max_x = pdata->max_x;
+		ts->min_y = pdata->min_y;
+		ts->max_y = pdata->max_y;
 	} else {
 		/* U-MoBo defaults */
 		ts->x_plate_ohms = 600;
@@ -543,12 +571,21 @@ static int sx865x_probe(struct i2c_client *client,
 		ts->invert_x = 0;
 		ts->invert_y = 1;
 		ts->swap_xy = 0;
+		ts->max_x = 3903;
+		ts->min_x = 128;
+		ts->max_y = 3839;
+		ts->min_y = 256;
 	}
 	if (!ts->max_dx)
 		ts->max_dx = MAX_12BIT >> 3;
 	if (!ts->max_dy)
 		ts->max_dy = MAX_12BIT >> 4;
 	ts->min_rx = ts->min_ry = MAX_12BIT;
+
+	if ((ts->max_x > ts->min_x) && (ts->max_y > ts->min_y)) {
+		ts->delta_x = ts->max_x - ts->min_x + 1;
+		ts->delta_y = ts->max_y - ts->min_y + 1;
+	}
 
 	ts->scantime_jiffies = msecs_to_jiffies(SX865X_UP_SCANTIME_MS);
 
