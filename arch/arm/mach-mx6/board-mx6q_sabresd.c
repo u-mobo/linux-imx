@@ -2148,6 +2148,9 @@ static void __init mx6q_sabresd_reserve(void)
 	fb_array_size = ARRAY_SIZE(sabresd_fb_data);
 	if (fb_array_size > 0 && sabresd_fb_data[0].res_base[0] &&
 	    sabresd_fb_data[0].res_size[0]) {
+		if (sabresd_fb_data[0].res_base[0] > SZ_2G)
+			printk(KERN_INFO"UI Performance downgrade with FB phys address %x!\n",
+			    sabresd_fb_data[0].res_base[0]);
 		memblock_reserve(sabresd_fb_data[0].res_base[0],
 				 sabresd_fb_data[0].res_size[0]);
 		memblock_remove(sabresd_fb_data[0].res_base[0],
@@ -2159,24 +2162,24 @@ static void __init mx6q_sabresd_reserve(void)
 	for (i = fb0_reserved; i < fb_array_size; i++)
 		if (sabresd_fb_data[i].res_size[0]) {
 			/* Reserve for other background buffer. */
-			phys = memblock_alloc(sabresd_fb_data[i].res_size[0],
-						SZ_4K);
+			phys = memblock_alloc_base(sabresd_fb_data[i].res_size[0],
+						SZ_4K, SZ_2G);
 			memblock_remove(phys, sabresd_fb_data[i].res_size[0]);
 			sabresd_fb_data[i].res_base[0] = phys;
 		}
 
 #ifdef CONFIG_ANDROID_RAM_CONSOLE
-	phys = memblock_alloc_base(SZ_128K, SZ_4K, SZ_1G);
-	memblock_remove(phys, SZ_128K);
-	memblock_free(phys, SZ_128K);
+	phys = memblock_alloc_base(SZ_1M, SZ_4K, SZ_1G);
+	memblock_remove(phys, SZ_1M);
+	memblock_free(phys, SZ_1M);
 	ram_console_resource.start = phys;
-	ram_console_resource.end   = phys + SZ_128K - 1;
+	ram_console_resource.end   = phys + SZ_1M - 1;
 #endif
 
 #if defined(CONFIG_MXC_GPU_VIV) || defined(CONFIG_MXC_GPU_VIV_MODULE)
 	if (imx6q_gpu_pdata.reserved_mem_size) {
 		phys = memblock_alloc_base(imx6q_gpu_pdata.reserved_mem_size,
-					   SZ_4K, SZ_1G);
+					   SZ_4K, SZ_2G);
 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
 		imx6q_gpu_pdata.reserved_mem_base = phys;
 	}

@@ -146,6 +146,9 @@ module_param(logFileSize,uint, 0644);
 static int showArgs = 0;
 module_param(showArgs, int, 0644);
 
+int gpu3DMinClock = 0;
+module_param(gpu3DMinClock, int, 0644);
+
 #if ENABLE_GPU_CLOCK_BY_DRIVER
     unsigned long coreClock = 156000000;
     module_param(coreClock, ulong, 0644);
@@ -231,7 +234,7 @@ int drv_open(
         gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
     }
 
-    data = kmalloc(sizeof(gcsHAL_PRIVATE_DATA), GFP_KERNEL | __GFP_NOWARN);
+    data = kmalloc(sizeof(gcsHAL_PRIVATE_DATA), GFP_KERNEL);
 
     if (data == gcvNULL)
     {

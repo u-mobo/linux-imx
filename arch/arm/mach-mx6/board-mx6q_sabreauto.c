@@ -144,8 +144,8 @@ extern char *gp_reg_id;
 extern char *soc_reg_id;
 extern char *pu_reg_id;
 
-static int mma8451_position = 3;
-static int mag3110_position = 2;
+static int mma8451_position = 7;
+static int mag3110_position = 7;
 static struct clk *sata_clk;
 static int mipi_sensor;
 static int can0_enable;
@@ -153,6 +153,7 @@ static int uart3_en;
 static int tuner_en;
 static int spinor_en;
 static int weimnor_en;
+static int caam_enabled;
 
 static int __init spinor_enable(char *p)
 {
@@ -1460,6 +1461,13 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
 	}
 }
 
+static int __init caam_setup(char *__unused)
+{
+	caam_enabled = 1;
+	return 1;
+}
+early_param("caam", caam_setup);
+
 static int __init early_enable_mipi_sensor(char *p)
 {
 	mipi_sensor = 1;
@@ -1704,7 +1712,8 @@ static void __init mx6_board_init(void)
 
 	imx6q_add_imx_snvs_rtc();
 
-	imx6q_add_imx_caam();
+	if (1 == caam_enabled)
+		imx6q_add_imx_caam();
 
 	imx6q_add_imx_i2c(1, &mx6q_sabreauto_i2c1_data);
 	i2c_register_board_info(1, mxc_i2c1_board_info,
@@ -1865,6 +1874,9 @@ static void __init mx6q_reserve(void)
 	fb_array_size = ARRAY_SIZE(sabr_fb_data);
 	if (fb_array_size > 0 && sabr_fb_data[0].res_base[0] &&
 	    sabr_fb_data[0].res_size[0]) {
+		if (sabr_fb_data[0].res_base[0] > SZ_2G)
+			printk(KERN_INFO"UI Performance downgrade with FB phys address %x!\n",
+			    sabr_fb_data[0].res_base[0]);
 		memblock_reserve(sabr_fb_data[0].res_base[0],
 				 sabr_fb_data[0].res_size[0]);
 		memblock_remove(sabr_fb_data[0].res_base[0],
@@ -1876,8 +1888,8 @@ static void __init mx6q_reserve(void)
 	for (i = fb0_reserved; i < fb_array_size; i++)
 		if (sabr_fb_data[i].res_size[0]) {
 			/* Reserve for other background buffer. */
-			phys = memblock_alloc(sabr_fb_data[i].res_size[0],
-						SZ_4K);
+			phys = memblock_alloc_base(sabr_fb_data[i].res_size[0],
+						SZ_4K, SZ_2G);
 			memblock_remove(phys, sabr_fb_data[i].res_size[0]);
 			sabr_fb_data[i].res_base[0] = phys;
 		}
