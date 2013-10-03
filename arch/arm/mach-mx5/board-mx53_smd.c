@@ -639,12 +639,12 @@ static struct fsl_mxc_lightsensor_platform_data ls_data = {
 	.rext = 700,    /* calibration: 499K->700K */
 };
 
-static int mma8451_position = 4;
+static int mma8x5x_position = 4;
 
 static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("mma8451", 0x1c),
-		.platform_data = (void *)&mma8451_position,
+		I2C_BOARD_INFO("mma8x5x", 0x1c),
+		.platform_data = (void *)&mma8x5x_position,
 	},
 	{
 		I2C_BOARD_INFO("ov5642", 0x3c),

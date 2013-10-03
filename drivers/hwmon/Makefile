@@ -121,6 +121,7 @@ obj-$(CONFIG_SENSORS_W83L786NG)	+= w83l786ng.o
 obj-$(CONFIG_SENSORS_WM831X)	+= wm831x-hwmon.o
 obj-$(CONFIG_SENSORS_WM8350)	+= wm8350-hwmon.o
 obj-$(CONFIG_SENSORS_MAG3110)   += mag3110.o
+obj-$(CONFIG_SENSORS_MMA8450)	+= mma8450.o
 obj-$(CONFIG_SENSORS_MMA8X5X)       += mma8x5x.o
 obj-$(CONFIG_SENSORS_DA9052)	+= da9052-adc.o
 obj-$(CONFIG_SENSORS_IMX_AHCI)	+= imx_ahci_hwmon.o
