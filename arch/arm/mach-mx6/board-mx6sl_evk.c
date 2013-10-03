@@ -53,6 +53,7 @@
 #include <sound/wm8962.h>
 #include <sound/pcm.h>
 #include <linux/power/sabresd_battery.h>
+#include <linux/ion.h>
 
 #include <mach/common.h>
 #include <mach/hardware.h>
@@ -91,6 +92,19 @@ extern int __init mx6sl_evk_init_pfuze100(u32 int_gpio);
 static int csi_enabled;
 
 #define SXSDMAN_BLUETOOTH_ENABLE
+
+static struct ion_platform_data imx_ion_data = {
+	.nr = 1,
+	.heaps = {
+		{
+		.id = 0,
+		.type = ION_HEAP_TYPE_CARVEOUT,
+		.name = "vpu_ion",
+		.size = SZ_16M,
+		.cacheable = 1,
+		},
+	},
+};
 
 static iomux_v3_cfg_t mx6sl_brd_csi_enable_pads[] = {
 	MX6SL_PAD_EPDC_GDRL__CSI_MCLK,
@@ -233,12 +247,14 @@ static const struct esdhc_platform_data mx6_evk_sd1_data __initconst = {
 };
 
 static const struct esdhc_platform_data mx6_evk_sd2_data __initconst = {
+	.always_present = 1,
 	.cd_gpio		= MX6_BRD_SD2_CD,
 	.wp_gpio		= MX6_BRD_SD2_WP,
 	.keep_power_at_suspend	= 1,
 	.delay_line		= 0,
 	.support_18v		= 1,
 	.platform_pad_change = plt_sd_pad_change,
+	.cd_type = ESDHC_CD_PERMANENT,
 };
 
 static const struct esdhc_platform_data mx6_evk_sd3_data __initconst = {
@@ -1342,18 +1358,18 @@ static struct mxc_fb_platform_data hdmi_fb_data[] = {
 };
 
 static int mx6sl_evk_keymap[] = {
-	KEY(0, 0, KEY_SELECT),
-	KEY(0, 1, KEY_BACK),
-	KEY(0, 2, KEY_F1),
+	KEY(0, 0, KEY_VOLUMEUP),
+	KEY(0, 1, KEY_VOLUMEDOWN),
+	KEY(0, 2, KEY_RIGHT),
 	KEY(0, 3, KEY_F2),
 
-	KEY(1, 0, KEY_F3),
-	KEY(1, 1, KEY_F4),
-	KEY(1, 2, KEY_F5),
+	KEY(1, 0, KEY_LEFT),
+	KEY(1, 1, KEY_UP),
+	KEY(1, 2, KEY_POWER),
 	KEY(1, 3, KEY_MENU),
 
-	KEY(2, 0, KEY_PREVIOUS),
-	KEY(2, 1, KEY_NEXT),
+	KEY(2, 0, KEY_BACK),
+	KEY(2, 1, KEY_DOWN),
 	KEY(2, 2, KEY_HOME),
 	KEY(2, 3, KEY_NEXT),
 
@@ -1577,8 +1593,8 @@ static void __init mx6_evk_init(void)
 	imx6_init_fec(fec_data);
 
 	platform_device_register(&evk_vmmc_reg_devices);
-	imx6q_add_sdhci_usdhc_imx(0, &mx6_evk_sd1_data);
 	imx6q_add_sdhci_usdhc_imx(1, &mx6_evk_sd2_data);
+	imx6q_add_sdhci_usdhc_imx(0, &mx6_evk_sd1_data);
 	imx6q_add_sdhci_usdhc_imx(2, &mx6_evk_sd3_data);
 
 	mx6_evk_init_usb();
@@ -1646,6 +1662,11 @@ static void __init mx6_evk_init(void)
 	platform_device_register(&evk_max8903_charger_1);
 	pm_power_off = mx6_snvs_poweroff;
 	imx6q_add_pm_imx(0, &mx6sl_evk_pm_data);
+
+	if (imx_ion_data.heaps[0].size)
+		platform_device_register_resndata(NULL, "ion-mxc", 0, NULL, 0, \
+		&imx_ion_data, sizeof(imx_ion_data) + sizeof(struct ion_platform_heap));
+
 }
 
 extern void __iomem *twd_base;
@@ -1676,6 +1697,14 @@ static void __init mx6_evk_reserve(void)
 					   SZ_4K, MEMBLOCK_ALLOC_ACCESSIBLE);
 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
 		imx6q_gpu_pdata.reserved_mem_base = phys;
+	}
+#endif
+
+#if defined(CONFIG_ION)
+	if (imx_ion_data.heaps[0].size) {
+		phys = memblock_alloc(imx_ion_data.heaps[0].size, SZ_4K);
+		memblock_remove(phys, imx_ion_data.heaps[0].size);
+		imx_ion_data.heaps[0].base = phys;
 	}
 #endif
 }

@@ -678,6 +678,10 @@ static int mxcfb_set_par(struct fb_info *fbi)
 		}
 	}
 
+	/* Clear activate as not Reconfiguring framebuffer again */
+	if ((fbi->var.activate & FB_ACTIVATE_FORCE) &&
+		(fbi->var.activate & FB_ACTIVATE_MASK) == FB_ACTIVATE_NOW)
+		fbi->var.activate = FB_ACTIVATE_NOW;
 	mxc_fbi->cur_var = fbi->var;
 
 	return retval;
