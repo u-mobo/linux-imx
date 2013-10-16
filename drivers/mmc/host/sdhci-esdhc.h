@@ -48,6 +48,7 @@
 
 static inline void esdhc_set_clock(struct sdhci_host *host, unsigned int clock)
 {
+	int max_clock = clock;
 	int pre_div = 2;
 	int div = 1;
 	u32 temp;
@@ -72,10 +73,15 @@ static inline void esdhc_set_clock(struct sdhci_host *host, unsigned int clock)
 	if (clock == 0)
 		goto out;
 
-	while (host->max_clk / pre_div / 16 > clock && pre_div < 256)
+	if (boarddata->max_clk && (max_clock > boarddata->max_clk)) {
+		max_clock = boarddata->max_clk;
+		dev_dbg(mmc_dev(host->mmc), "SD clock limited to %d via platform data\n", max_clock);
+	}
+
+	while (host->max_clk / pre_div / 16 > max_clock && pre_div < 256)
 		pre_div *= 2;
 
-	while (host->max_clk / pre_div / div > clock && div < 16)
+	while (host->max_clk / pre_div / div > max_clock && div < 16)
 		div++;
 
 	dev_dbg(mmc_dev(host->mmc), "desired SD clock: %d, actual: %d\n",

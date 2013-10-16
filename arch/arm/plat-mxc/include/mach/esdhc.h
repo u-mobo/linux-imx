@@ -37,5 +37,6 @@ struct esdhc_platform_data {
 	unsigned int delay_line;
 	bool runtime_pm;
 	int (*platform_pad_change)(unsigned int index, int clock);
+	unsigned int max_clk;
 };
 #endif /* __ASM_ARCH_IMX_ESDHC_H */
