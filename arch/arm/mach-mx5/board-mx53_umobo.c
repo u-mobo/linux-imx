@@ -762,7 +762,7 @@ static int mx53_umobo_bt_power_change(int status)
 }
 
 static struct platform_device umobo_bt_rfkill = {
-	.name = "mxc_bt_rfkill",
+	.name = "imx_bt_rfkill",
 };
 
 static struct imx_bt_rfkill_platform_data umobo_bt_rfkill_data = {
