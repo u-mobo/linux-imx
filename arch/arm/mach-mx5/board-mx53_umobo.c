@@ -611,14 +611,19 @@ static const struct esdhc_platform_data mx53_umobo_sd2_data __initconst = {
 	.cd_type = ESDHC_CD_CONTROLLER,
 };
 
+#ifdef CONFIG_WL12XX_PLATFORM_DATA
 /* SDIO WiFi */
 static const struct esdhc_platform_data mx53_umobo_sd4_data __initconst = {
 	.always_present = 1,
-	.keep_power_at_suspend = 1,
+	.cd_gpio = -1,
+	.wp_gpio = -1,
+	.keep_power_at_suspend = 0,
 	.delay_line = 0,
 	.cd_type = ESDHC_CD_PERMANENT,
 	.runtime_pm = 1,
+	.max_clk = 15000000,
 };
+#endif
 
 #ifdef UMOBO_CAMERA
 static void mx53_umobo_csi0_cam_powerdown(int powerdown)
@@ -834,11 +839,13 @@ static int __init umobo_som_pca953x_setup(struct i2c_client *client,
 	gpio_direction_output(MX53_UMOBO_TIWI_BT_EN, 0);
 	gpio_direction_output(MX53_UMOBO_TIWI_FM_EN, 0);
 	gpio_free(MX53_UMOBO_TIWI_WLAN_EN);
+	platform_device_register(&umobo_wl1271_reg_device);
 
 	/* WL12xx WLAN Init */
 	if (wl12xx_set_platform_data(&umobo_wl1271_data))
 		pr_err("error setting wl12xx data\n");
-	platform_device_register(&umobo_wl1271_reg_device);
+
+	imx53_add_sdhci_esdhc_imx(3, &mx53_umobo_sd4_data);
 
 	/* provide BT */
 	mxc_register_device(&umobo_bt_rfkill, &umobo_bt_rfkill_data);
@@ -1642,7 +1649,6 @@ static void __init mx53_umobo_board_init(void)
 
 	imx53_add_sdhci_esdhc_imx(0, &mx53_umobo_sd1_data);
 	imx53_add_sdhci_esdhc_imx(1, &mx53_umobo_sd2_data);
-	imx53_add_sdhci_esdhc_imx(3, &mx53_umobo_sd4_data);
 
 	imx53_add_ahci(0, &mx53_umobo_sata_data);
 	mxc_register_device(&imx_ahci_device_hwmon, NULL);
