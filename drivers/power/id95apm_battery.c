@@ -19,19 +19,16 @@
 #include <linux/mfd/id95apm.h>
 #include <linux/slab.h>
 
-#define UEVENT_UPDATE_INTERVALL_MS	1000
+#define UEVENT_UPDATE_INTERVALL_MS	10000
 
-static struct timer_list uevent_timer;
+struct id95apm_battery_data {
+	struct delayed_work work;
+	struct workqueue_struct *workqueue;
+	struct id95apm *id95apm;
+	unsigned int delay;
+};
 
-static void uevent_timer_fn(long unsigned int data)
-{
-	struct id95apm *id95apm = (struct id95apm *)data;
-
-	power_supply_changed(id95apm->battery);
-	power_supply_changed(id95apm->charger);
-
-	mod_timer(&uevent_timer, jiffies + msecs_to_jiffies(UEVENT_UPDATE_INTERVALL_MS));
-}
+static struct id95apm_battery_data *battery_data;
 
 static int id95apm_battery_status(struct id95apm *id95apm)
 {
@@ -47,10 +44,8 @@ static int id95apm_battery_status(struct id95apm *id95apm)
 		return POWER_SUPPLY_STATUS_CHARGING;
 	if (state2 & ID95APM_CHGR_BLOCK_FAULT_DONE)
 		return POWER_SUPPLY_STATUS_FULL;
-	if ((state1 & ID95APM_CHGR_OP_STAT_CHMODE) == ID95APM_CHGR_OP_STAT_HOLD)
-		return POWER_SUPPLY_STATUS_NOT_CHARGING;
 
-	return POWER_SUPPLY_STATUS_UNKNOWN;
+	return POWER_SUPPLY_STATUS_NOT_CHARGING;
 }
 
 static int id95apm_battery_health(struct id95apm *id95apm)
@@ -102,15 +97,10 @@ static int id95apm_battery_voltage(struct id95apm *id95apm)
 {
 	int ret;
 
-	if (id95apm_battery_status(id95apm) == POWER_SUPPLY_STATUS_UNKNOWN)
-		return 0;
-
-	/* Calculate voltage in mV */
+	/* Battery converted voltage (12 bits) */
 	ret = id95apm_reg16_read(id95apm, ID95APM_TSC_BAT_RES);
-	ret = (ret * 4200) / 4096;
 
-	/* Return voltage in uV */
-	return ret * 1000;
+	return ++ret;
 }
 
 static int id95apm_battery_temp(struct id95apm *id95apm)
@@ -135,7 +125,10 @@ static int id95apm_battery_get_property(struct power_supply *psy,
 
 	switch (prop) {
 	case POWER_SUPPLY_PROP_STATUS:
-		val->intval = id95apm_battery_status(id95apm);
+		if (id95apm_battery_voltage(id95apm) == 4096)
+			val->intval = POWER_SUPPLY_STATUS_FULL;
+		else
+			val->intval = id95apm_battery_status(id95apm);
 		break;
 
 	case POWER_SUPPLY_PROP_HEALTH:
@@ -147,15 +140,37 @@ static int id95apm_battery_get_property(struct power_supply *psy,
 		break;
 
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-		val->intval = id95apm_battery_voltage(id95apm);
+		/* Voltage in uV = (Vb * 4200000) / 4096 = (Vb * 65625) / 64 */
+		val->intval = (id95apm_battery_voltage(id95apm) * 65625) >> 6;
+		break;
+
+	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
+		val->intval = 0;
+		break;
+
+	case POWER_SUPPLY_PROP_CHARGE_FULL:
+	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+		val->intval = 4096 << 10;
+		break;
+
+	case POWER_SUPPLY_PROP_CHARGE_NOW:
+		/* wrap status-capacity inconsistencies */
+		if (id95apm_battery_status(id95apm) == POWER_SUPPLY_STATUS_FULL)
+			val->intval = 4096 << 10;
+		else
+			val->intval = id95apm_battery_voltage(id95apm) << 10;
 		break;
 
 	case POWER_SUPPLY_PROP_CAPACITY:
-		val->intval = id95apm_battery_voltage(id95apm) / 42000;
+		/* wrap status-capacity inconsistencies */
+		if (id95apm_battery_status(id95apm) == POWER_SUPPLY_STATUS_FULL)
+			val->intval = 100;
+		else
+			val->intval = (id95apm_battery_voltage(id95apm) * 100) >> 12;
 		break;
 
 	case POWER_SUPPLY_PROP_PRESENT:
-		val->intval = (id95apm_battery_status(id95apm) != POWER_SUPPLY_STATUS_UNKNOWN);
+		val->intval = !((id95apm_battery_status(id95apm) == POWER_SUPPLY_STATUS_NOT_CHARGING) && (id95apm_battery_voltage(id95apm) < 1024));
 		break;
 
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
@@ -178,6 +193,10 @@ static enum power_supply_property id95apm_battery_props[] = {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
+	POWER_SUPPLY_PROP_CHARGE_FULL,
+	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
@@ -216,6 +235,25 @@ static enum power_supply_property id95apm_charger_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 };
 
+static void battery_monitor_func(struct work_struct *work)
+{
+	struct id95apm_battery_data *battery_data = container_of(work, struct id95apm_battery_data, work.work);
+	struct id95apm *id95apm = battery_data->id95apm;
+	int new_voltage, delta;
+	static int old_voltage = 0;
+
+	new_voltage = id95apm_battery_voltage(id95apm);
+	delta = new_voltage - old_voltage;
+	if ((delta < -409) || (delta > 409)) {
+		dev_dbg(id95apm->dev, "Capacity changed!\n");
+		old_voltage = new_voltage;
+		power_supply_changed(id95apm->battery);
+		power_supply_changed(id95apm->charger);
+	}
+
+	queue_delayed_work(battery_data->workqueue, &battery_data->work, battery_data->delay);
+}
+
 static void charger_handler(struct id95apm *id95apm, int irq, void *data)
 {
 	u8 val;
@@ -223,19 +261,17 @@ static void charger_handler(struct id95apm *id95apm, int irq, void *data)
 	val = id95apm_reg_read(id95apm, ID95APM_CHGR_IRQ_STAT);
 
 	if (val & ID95APM_CHGR_IRQ_ADAPTER) {
-		dev_dbg(id95apm->dev,
-			"Battery adapter input status changed!\n");
+		dev_dbg(id95apm->dev, "Adapter input status changed!\n");
 	}
 
 	if (val & ID95APM_CHGR_IRQ_CUR_LIM) {
-		dev_dbg(id95apm->dev,
-			"Battery current limit status changed!\n");
-		power_supply_changed(id95apm->battery);
+		dev_dbg(id95apm->dev, "Current limit status changed!\n");
 	}
 
 	if (val & ID95APM_CHGR_IRQ_CHRG_STATE) {
-		dev_dbg(id95apm->dev, "Battery charging state changed!\n");
+		dev_dbg(id95apm->dev, "Charging state changed!\n");
 		power_supply_changed(id95apm->battery);
+		power_supply_changed(id95apm->charger);
 	}
 
 	/*
@@ -253,11 +289,21 @@ static int id95apm_battery_probe(struct platform_device *pdev)
 
 	/* Already set by core driver */
 	id95apm = platform_get_drvdata(pdev);
+	if (!id95apm) {
+		ret = -ENODEV;
+		goto drv_get_fail;
+	}
+
+	battery_data = kzalloc(sizeof(*battery_data), GFP_KERNEL);
+	if (!battery_data) {
+		ret = -ENOMEM;
+		goto data_alloc_fail;
+	}
 
 	battery = kzalloc(sizeof(*battery), GFP_KERNEL);
 	if (!battery) {
 		ret = -ENOMEM;
-		goto fail;
+		goto bat_alloc_fail;
 	}
 	id95apm->battery = battery;
 
@@ -269,13 +315,13 @@ static int id95apm_battery_probe(struct platform_device *pdev)
 	ret = power_supply_register(&pdev->dev, battery);
 	if (ret) {
 		dev_err(id95apm->dev, "failed to register battery\n");
-		goto fail;
+		goto bat_reg_fail;
 	}
 
 	charger = kzalloc(sizeof(*charger), GFP_KERNEL);
 	if (!charger) {
 		ret = -ENOMEM;
-		goto fail;
+		goto chg_alloc_fail;
 	}
 	id95apm->charger = charger;
 
@@ -287,7 +333,7 @@ static int id95apm_battery_probe(struct platform_device *pdev)
 	ret = power_supply_register(&pdev->dev, charger);
 	if (ret) {
 		dev_err(id95apm->dev, "failed to register charger\n");
-		goto fail;
+		goto chg_reg_fail;
 	}
 
 	/* Set 500mA charging current */
@@ -313,14 +359,31 @@ static int id95apm_battery_probe(struct platform_device *pdev)
 	 */
 	id95apm_reg_write(id95apm, ID95APM_CHGR_IRQ_EN, ID95APM_CHGR_IRQ_MASK);
 
-	setup_timer(&uevent_timer, uevent_timer_fn, (long unsigned int)id95apm);
-	mod_timer(&uevent_timer, jiffies + msecs_to_jiffies(UEVENT_UPDATE_INTERVALL_MS));
+	INIT_DELAYED_WORK(&battery_data->work, battery_monitor_func);
+	battery_data->workqueue = create_singlethread_workqueue("id95apm_battery_workqueue");
+	if (!battery_data->workqueue) {
+		dev_err(id95apm->dev, "%s(): wqueue init failed\n", __func__);
+		ret = -ESRCH;
+		goto wqueue_fail;
+	}
+	battery_data->delay = msecs_to_jiffies(UEVENT_UPDATE_INTERVALL_MS);
+	battery_data->id95apm = id95apm;
+	queue_delayed_work(battery_data->workqueue, &battery_data->work, battery_data->delay);
 
 	return 0;
 
-fail:
+wqueue_fail:
+	power_supply_unregister(id95apm->charger);
+chg_reg_fail:
+	kfree(id95apm->charger);
+chg_alloc_fail:
+	power_supply_unregister(id95apm->battery);
+bat_reg_fail:
 	kfree(id95apm->battery);
-
+bat_alloc_fail:
+	kfree(battery_data);
+data_alloc_fail:
+drv_get_fail:
 	return ret;
 }
 
@@ -332,7 +395,8 @@ static int id95apm_battery_remove(struct platform_device *pdev)
 	power_supply_unregister(id95apm->battery);
 	kfree(id95apm->battery);
 
-	del_timer(&uevent_timer);
+	cancel_delayed_work(&battery_data->work);
+	destroy_workqueue(battery_data->workqueue);
 
 	return 0;
 }
