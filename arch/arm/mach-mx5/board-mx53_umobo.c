@@ -169,7 +169,6 @@ extern char *lp_reg_id;
 extern char *gp_reg_id;
 extern void mx5_cpu_regulator_init(void);
 extern int mx53_umobo_init_da9052(void);
-extern int mx53_umobo_init_msp430(void);
 
 static iomux_v3_cfg_t mx53_umobo_pads[] = {
 	/* UART1 (UART4 on schematics) */
@@ -1195,6 +1194,9 @@ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
 		//.platform_data = &umobo_lcd_sx865x_data,
 		//.irq = gpio_to_irq(MX53_UMOBO_BASEBOARD_LCD_nIRQ),
 	},
+	{
+		I2C_BOARD_INFO("umobo_msp430_wan", 0x3b),
+	},
 };
 
 static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
@@ -1659,7 +1661,6 @@ static void __init mx53_umobo_board_init(void)
 	imx53_add_iim(&iim_data);
 
 	mx53_umobo_init_da9052();
-	mx53_umobo_init_msp430();
 
 	spi_register_board_info(mxc_spi1_board_info,
 				ARRAY_SIZE(mxc_spi1_board_info));

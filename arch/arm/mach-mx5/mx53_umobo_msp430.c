@@ -198,23 +198,22 @@ static struct i2c_driver umobo_msp430_wan_driver = {
 	.remove		= umobo_msp430_wan_remove,
 };
 
-static struct i2c_board_info __initdata umobo_msp430_i2c0_board_info[] = {
-	{
-		I2C_BOARD_INFO("umobo_msp430_wan", 0x3b),
-	},
-};
-
-int __init mx53_umobo_init_msp430(void)
+static int __init mx53_umobo_msp430_init(void)
 {
 	int res;
 
 	res = i2c_add_driver(&umobo_msp430_wan_driver);
-	if (res)
-		return res;
-
-	res = i2c_register_board_info(0, umobo_msp430_i2c0_board_info, ARRAY_SIZE(umobo_msp430_i2c0_board_info));
-	if (res)
-		return res;
-
-	return 0;
+	if (res < 0) {
+		printk(KERN_INFO "add mx53_umobo_msp430_wan i2c driver failed\n");
+		return -ENODEV;
+	}
+	return res;
 }
+
+static void __exit mx53_umobo_msp430_exit(void)
+{
+	i2c_del_driver(&umobo_msp430_wan_driver);
+}
+
+module_init(mx53_umobo_msp430_init);
+module_exit(mx53_umobo_msp430_exit);
