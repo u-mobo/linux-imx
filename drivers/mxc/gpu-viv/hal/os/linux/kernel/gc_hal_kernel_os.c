@@ -3856,9 +3856,6 @@ gckOS_AllocatePagedMemoryEx(
     gctSIZE_T bytes;
     gctBOOL locked = gcvFALSE;
     gceSTATUS status;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
-    gctPOINTER addr = gcvNULL;
-#endif
 
     gcmkHEADER_ARG("Os=0x%X Contiguous=%d Bytes=%lu", Os, Contiguous, Bytes);
 
@@ -3884,27 +3881,13 @@ gckOS_AllocatePagedMemoryEx(
     {
         /* Get contiguous pages, and suppress warning (stack dump) from kernel when
            we run out of memory. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
-        addr =
-            alloc_pages_exact(numPages * PAGE_SIZE, GFP_KERNEL | gcdNOWARN | __GFP_NORETRY);
-
-        mdl->u.contiguousPages = addr
-                               ? virt_to_page(addr)
-                               : gcvNULL;
-
-        mdl->exact = gcvTRUE;
-#else
         mdl->u.contiguousPages =
             alloc_pages(GFP_KERNEL | gcdNOWARN | __GFP_NORETRY, GetOrder(numPages));
-#endif
+
         if (mdl->u.contiguousPages == gcvNULL)
         {
             mdl->u.contiguousPages =
                 alloc_pages(GFP_KERNEL | __GFP_HIGHMEM | gcdNOWARN, GetOrder(numPages));
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
-            mdl->exact = gcvFALSE;
-#endif
         }
     }
     else
@@ -4049,16 +4032,7 @@ gckOS_FreePagedMemory(
 
     if (mdl->contiguous)
     {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
-        if (mdl->exact == gcvTRUE)
-        {
-            free_pages_exact(page_address(mdl->u.contiguousPages), mdl->numPages * PAGE_SIZE);
-        }
-        else
-#endif
-        {
-            __free_pages(mdl->u.contiguousPages, GetOrder(mdl->numPages));
-        }
+	__free_pages(mdl->u.contiguousPages, GetOrder(mdl->numPages));
     }
     else
     {
@@ -6827,6 +6801,7 @@ gckOS_GetThreadID(
 **
 **      Nothing.
 */
+extern struct mutex set_cpufreq_lock;
 gceSTATUS
 gckOS_SetGPUPower(
     IN gckOS Os,
@@ -6869,8 +6844,10 @@ gckOS_SetGPUPower(
 	if((Power == gcvTRUE) && (oldPowerState == gcvFALSE))
 	{
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
+            mutex_lock(&set_cpufreq_lock);
         if(!IS_ERR(Os->device->gpu_regulator))
             regulator_enable(Os->device->gpu_regulator);
+	    mutex_unlock(&set_cpufreq_lock);
 #else
         imx_gpc_power_up_pu(true);
 #endif
@@ -6986,8 +6963,10 @@ gckOS_SetGPUPower(
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
+	    mutex_lock(&set_cpufreq_lock);
         if(!IS_ERR(Os->device->gpu_regulator))
             regulator_disable(Os->device->gpu_regulator);
+	    mutex_unlock(&set_cpufreq_lock);
 #else
         imx_gpc_power_up_pu(false);
 #endif
@@ -8453,7 +8432,17 @@ gckOS_StartTimer(
 
     if (unlikely(delayed_work_pending(&timer->work)))
     {
-        cancel_delayed_work(&timer->work);
+        if (unlikely(!cancel_delayed_work(&timer->work)))
+        {
+            cancel_work_sync(&timer->work.work);
+
+            if (unlikely(delayed_work_pending(&timer->work)))
+            {
+                gckOS_Print("gckOS_StartTimer error, the pending worker cannot complete!!!! \n");
+
+                return gcvSTATUS_INVALID_REQUEST;
+            }
+        }
     }
 
     queue_delayed_work(Os->workqueue, &timer->work, msecs_to_jiffies(Delay));

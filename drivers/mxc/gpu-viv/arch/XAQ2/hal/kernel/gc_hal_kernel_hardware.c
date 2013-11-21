@@ -728,6 +728,13 @@ gckHARDWARE_Construct(
 
     default:
         hardware->type = gcvHARDWARE_3D;
+        if(hardware->identity.chipModel == gcv880)
+        {
+            /*set outstanding limit*/
+            gcmkONERROR(gckOS_ReadRegisterEx(Os, Core, 0x00414, &axi_ot));
+            axi_ot = (axi_ot & (~0xFF)) | 0x10;
+            gcmkONERROR(gckOS_WriteRegisterEx(Os, Core, 0x00414, axi_ot));
+        }
 
         if ((((((gctUINT32) (hardware->identity.chipFeatures)) >> (0 ? 9:9)) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))) ))
         {
@@ -1198,6 +1205,14 @@ gckHARDWARE_InitializeHardware(
 #endif
 
     /* Limit 2D outstanding request. */
+    if(Hardware->identity.chipModel == gcv880)
+    {
+        gctUINT32 axi_ot;
+        gcmkONERROR(gckOS_ReadRegisterEx(Hardware->os, Hardware->core, 0x00414, &axi_ot));
+        axi_ot = (axi_ot & (~0xFF)) | 0x10;
+        gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os, Hardware->core, 0x00414, axi_ot));
+    }
+
     if ((Hardware->identity.chipModel == gcv320)
         && ((Hardware->identity.chipRevision == 0x5007)
         || (Hardware->identity.chipRevision == 0x5220)))
@@ -3958,6 +3973,23 @@ gckHARDWARE_SetPowerManagementState(
                 ** if lock holder call gckCOMMAND_Stall() */
                 gcmkONERROR(gcvSTATUS_INVALID_REQUEST);
             }
+#if gcdPOWEROFF_TIMEOUT
+            else if(State == gcvPOWER_OFF && timeout == gcvTRUE)
+            {
+                /*
+                ** try to aqcuire the mutex with more milliseconds,
+                ** flush_delayed_work should be running with timeout,
+                ** so waiting here will cause deadlock */
+                status = gckOS_AcquireMutex(os, Hardware->powerMutex, gcdPOWEROFF_TIMEOUT);
+
+                if (status == gcvSTATUS_TIMEOUT)
+                {
+                    gckOS_Print("GPU Timer deadlock, exit by timeout!!!!\n");
+
+                    gcmkONERROR(gcvSTATUS_INVALID_REQUEST);
+                }
+            }
+#endif
             else
             {
                 /* Acquire the power mutex. */
