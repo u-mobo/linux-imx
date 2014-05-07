@@ -457,6 +457,7 @@ static struct wm8962_pdata wm8962_config_data = {
 		[2] = WM8962_GPIO_FN_DMICCLK,
 		[4] = 0x8000 | WM8962_GPIO_FN_DMICDAT,
 	},
+	.clock_enable = wm8962_clk_enable,
 };
 
 static struct mxc_audio_platform_data wm8962_data = {
@@ -816,6 +817,7 @@ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
 	},
 	{
 		I2C_BOARD_INFO("mma8x5x", 0x1c),
+		.irq =	gpio_to_irq(SABRESD_ACCL_INT),
 		.platform_data = (void *)&mma8x5x_position,
 	},
 };
@@ -2139,6 +2141,9 @@ static void __init mx6_sabresd_board_init(void)
 	gpio_request(SABRESD_SENSOR_EN, "sensor-en");
 	gpio_direction_output(SABRESD_SENSOR_EN, 1);
 
+	/* enable accel intr */
+	gpio_request(SABRESD_ACCL_INT, "accel-int");
+	gpio_direction_input(SABRESD_ACCL_INT);
 	/* enable ecompass intr */
 	gpio_request(SABRESD_eCOMPASS_INT, "ecompass-int");
 	gpio_direction_input(SABRESD_eCOMPASS_INT);

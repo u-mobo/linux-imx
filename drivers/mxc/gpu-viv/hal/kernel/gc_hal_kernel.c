@@ -736,22 +736,27 @@ _AllocateMemory_Retry:
                     gctUINT32 physAddr=0;
                     gctUINT32 baseAddress = 0;
 
-                    gckOS_LockPages(Kernel->os,
-                                    node->Virtual.physical,
-                                    node->Virtual.bytes,
-                                    gcvFALSE,
-                                    &node->Virtual.logical,
-                                    &node->Virtual.pageCount);
+                    gcmkONERROR(
+                        gckOS_LockPages(Kernel->os,
+                                        node->Virtual.physical,
+                                        node->Virtual.bytes,
+                                        gcvFALSE,
+                                        &node->Virtual.logical,
+                                        &node->Virtual.pageCount));
 
                     /* Convert logical address into a physical address. */
-                    gckOS_GetPhysicalAddress(Kernel->os, node->Virtual.logical, &physAddr);
+                    gcmkONERROR(
+                        gckOS_GetPhysicalAddress(Kernel->os,
+                                                 node->Virtual.logical,
+                                                 &physAddr));
 
-                    gckOS_UnlockPages(Kernel->os,
-                                      node->Virtual.physical,
-                                      node->Virtual.bytes,
-                                      node->Virtual.logical);
+                    gcmkONERROR(
+                        gckOS_UnlockPages(Kernel->os,
+                                          node->Virtual.physical,
+                                          node->Virtual.bytes,
+                                          node->Virtual.logical));
 
-                    gckOS_GetBaseAddress(Kernel->os, &baseAddress);
+                    gcmkONERROR(gckOS_GetBaseAddress(Kernel->os, &baseAddress));
 
                     gcmkASSERT(physAddr >= baseAddress);
 
@@ -762,7 +767,7 @@ _AllocateMemory_Retry:
                     {
                         gckOS_Print("gpu virtual memory 0x%x cannot be allocated for external use !\n", physAddr);
 
-                        gckVIDMEM_Free(node);
+                        gcmkONERROR(gckVIDMEM_Free(node));
 
                         node = gcvNULL;
                     }
@@ -933,6 +938,7 @@ gckKERNEL_Dispatch(
 #if !USE_NEW_LINUX_SIGNAL
     gctSIGNAL   signal;
 #endif
+    gceSURF_TYPE type;
 
     gcmkHEADER_ARG("Kernel=0x%x FromUser=%d Interface=0x%x",
                    Kernel, FromUser, Interface);
@@ -1169,6 +1175,8 @@ gckKERNEL_Dispatch(
         break;
 
     case gcvHAL_ALLOCATE_LINEAR_VIDEO_MEMORY:
+        type = Interface->u.AllocateLinearVideoMemory.type;
+
         /* Allocate memory. */
         gcmkONERROR(
             _AllocateMemory(Kernel,
@@ -1181,6 +1189,7 @@ gckKERNEL_Dispatch(
         if (node->VidMem.memory->object.type == gcvOBJ_VIDMEM)
         {
             bytes = node->VidMem.bytes;
+            node->VidMem.type = type;
 
             gcmkONERROR(
                 gckKERNEL_AddProcessDB(Kernel,
@@ -1192,6 +1201,7 @@ gckKERNEL_Dispatch(
         else
         {
             bytes = node->Virtual.bytes;
+            node->Virtual.type = type;
 
             if(node->Virtual.contiguous)
             {
