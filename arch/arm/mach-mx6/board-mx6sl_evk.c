@@ -702,6 +702,21 @@ static struct fsl_mxc_lcd_platform_data sii902x_hdmi_data = {
        .put_pins = sii902x_put_pins,
 };
 
+static void seiko_wvga_enable_pins(void)
+{
+	gpio_set_value(MX6_BRD_LCD_PWR_EN, 1);
+}
+
+static void seiko_wvga_disable_pins(void)
+{
+	gpio_set_value(MX6_BRD_LCD_PWR_EN, 0);
+}
+
+static struct fsl_mxc_lcd_platform_data seiko_wvga_data = {
+       .enable_pins = seiko_wvga_enable_pins,
+       .disable_pins = seiko_wvga_disable_pins,
+};
+
 static void mx6sl_csi_io_init(void)
 {
 	mxc_iomux_v3_setup_multiple_pads(mx6sl_brd_csi_enable_pads,	\
@@ -1309,11 +1324,30 @@ static void __init mx6_evk_init_usb(void)
 #endif
 }
 
+static int seiko_wvga_check_fb(struct device *dev, struct fb_info *fbi)
+{
+	struct backlight_device *bd = dev_get_drvdata(dev);
+	struct fb_event *ev = bd->fb_event;
+	int fb_blank = *(int *)ev->data;
+
+	/*
+	 * The panel's spec mentions that backlight needs to
+	 * be turned on after display enable pin and fb are
+	 * active at least for 170ms(10 frames).
+	 * It is safe to use 200ms here.
+	 */
+	if (fb_blank == FB_BLANK_UNBLANK)
+		msleep(200);
+
+	return 1;
+}
+
 static struct platform_pwm_backlight_data mx6_evk_pwm_backlight_data = {
 	.pwm_id		= 0,
 	.max_brightness	= 255,
 	.dft_brightness	= 128,
-	.pwm_period_ns	= 50000,
+	.pwm_period_ns	= 1000000,
+	.check_fb = seiko_wvga_check_fb,
 };
 static struct fb_videomode wvga_video_modes[] = {
 	{
@@ -1335,6 +1369,9 @@ static struct mxc_fb_platform_data wvga_fb_data[] = {
 
 static struct platform_device lcd_wvga_device = {
 	.name = "lcd_seiko",
+	.dev = {
+		.platform_data = &seiko_wvga_data,
+	},
 };
 
 static struct fb_videomode hdmi_video_modes[] = {
@@ -1656,7 +1693,7 @@ static void __init mx6_evk_init(void)
 
 		gpio_request(MX6_BRD_LCD_PWR_EN, "elcdif-power-on");
 		gpio_direction_output(MX6_BRD_LCD_PWR_EN, 1);
-		mxc_register_device(&lcd_wvga_device, NULL);
+		platform_device_register(&lcd_wvga_device);
 	}
 
 	imx6dl_add_imx_pxp();
