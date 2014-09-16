@@ -9,6 +9,7 @@
 #define PHY_ID_KS8051		0x00221550
 /* both for ks8001 Rev. A/B, and for ks8721 Rev 3. */
 #define PHY_ID_KS8001		0x0022161A
+#define PHY_ID_KSZ9031          0x00221620
 
 /* struct phy_device dev_flags definitions */
 #define MICREL_PHY_50MHZ_CLK	0x00000001
