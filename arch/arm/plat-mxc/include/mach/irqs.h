@@ -56,6 +56,8 @@
 #define MXC_BOARD_IRQS  80
 #elif defined CONFIG_MACH_MX53_UMOBO
 #define MXC_BOARD_IRQS 64
+#elif defined CONFIG_MACH_SILVERBULLET
+#define MXC_BOARD_IRQS 64
 #else
 #define MXC_BOARD_IRQS	16
 #endif
