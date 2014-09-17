@@ -57,6 +57,7 @@
 #include <linux/input/adxl34x.h>
 #include <linux/input/l3g_gyro.h>
 #include <linux/wl12xx.h>
+#include <linux/ti_wilink_st.h>
 
 #include <mach/common.h>
 #include <mach/hardware.h>
@@ -183,7 +184,6 @@
 #define SILVERBULLET_LTC3676_INT	SILVERBULLET_PMIC_IRQ
 
 static struct clk *sata_clk;
-static struct clk *clko;
 static int mag3110_position = 6;
 static int caam_enabled;
 
@@ -203,26 +203,29 @@ static const struct esdhc_platform_data silverbullet_sd1_data __initconst = {
 };
 
 #ifdef CONFIG_WL12XX_PLATFORM_DATA
+static void tiwi_set_power(int status)
+{
+	gpio_set_value(SILVERBULLET_TIWI_WLAN_EN, status);
+}
+
 /* SDIO WiFi on ExM */
 static const struct esdhc_platform_data silverbullet_sd2_data __initconst = {
+	.always_present = 1,
 	.cd_gpio = -1,
 	.wp_gpio = -1,
 	.keep_power_at_suspend = 0,
-	.support_8bit = 1,
-	.delay_line = 0,
-	.cd_type = ESDHC_CD_CONTROLLER,
 	.runtime_pm = 1,
 	//.max_clk = 15000000,
+	.set_power = tiwi_set_power,
 };
-#endif
+#endif /* CONFIG_WL12XX_PLATFORM_DATA */
 
 /* SDIO Card Slot on SoM */
 static const struct esdhc_platform_data silverbullet_sd4_data __initconst = {
 	.always_present = 1,
+	.cd_gpio = -1,
+	.wp_gpio = -1,
 	.keep_power_at_suspend = 1,
-	.support_8bit = 0,
-	.delay_line = 0,
-	.cd_type = ESDHC_CD_PERMANENT,
 	//.max_clk = 25000000,
 };
 
@@ -929,27 +932,29 @@ static const struct pm_platform_data mx6q_silverbullet_pm_data __initconst = {
 	.suspend_exit = silverbullet_suspend_exit,
 };
 
-static struct regulator_consumer_supply silverbullet_sd4_vmmc_consumers[] = {
+static struct regulator_consumer_supply silverbullet_vmmc_consumers[] = {
+	REGULATOR_SUPPLY("vmmc", "sdhci-esdhc-imx.0"),
+	REGULATOR_SUPPLY("vmmc", "sdhci-esdhc-imx.1"),
 	REGULATOR_SUPPLY("vmmc", "sdhci-esdhc-imx.3"),
 };
 
-static struct regulator_init_data silverbullet_sd4_vmmc_init = {
-	.num_consumer_supplies = ARRAY_SIZE(silverbullet_sd4_vmmc_consumers),
-	.consumer_supplies = silverbullet_sd4_vmmc_consumers,
+static struct regulator_init_data silverbullet_vmmc_init = {
+	.num_consumer_supplies = ARRAY_SIZE(silverbullet_vmmc_consumers),
+	.consumer_supplies = silverbullet_vmmc_consumers,
 };
 
-static struct fixed_voltage_config silverbullet_sd4_vmmc_reg_config = {
+static struct fixed_voltage_config silverbullet_vmmc_reg_config = {
 	.supply_name		= "vmmc",
 	.microvolts		= 3300000,
 	.gpio			= -1,
-	.init_data		= &silverbullet_sd4_vmmc_init,
+	.init_data		= &silverbullet_vmmc_init,
 };
 
-static struct platform_device silverbullet_sd4_vmmc_reg_devices = {
+static struct platform_device silverbullet_vmmc_reg_devices = {
 	.name	= "reg-fixed-voltage",
 	.id	= 3,
 	.dev	= {
-		.platform_data = &silverbullet_sd4_vmmc_reg_config,
+		.platform_data = &silverbullet_vmmc_reg_config,
 	},
 };
 
@@ -1012,49 +1017,75 @@ static void __init imx6q_add_device_gpio_leds(void) {}
 #endif
 
 #ifdef CONFIG_WL12XX_PLATFORM_DATA
-static struct regulator_consumer_supply silverbullet_sd2_supply =
-	REGULATOR_SUPPLY("vmmc", "sdhci-esdhc-imx.1");
+#ifdef CONFIG_TI_ST
+int plat_kim_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	return 0;
+}
 
-struct regulator_init_data silverbullet_wl1271_reg_initdata = {
-	.constraints = {
-		.valid_ops_mask = REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies	= 1,
-	.consumer_supplies = &silverbullet_sd2_supply,
+int plat_kim_resume(struct platform_device *pdev)
+{
+	return 0;
+}
+
+int plat_kim_chip_enable(struct kim_data_s *kim_data)
+{
+	/* reset pulse to the BT controller */
+	usleep_range(150, 220);
+	gpio_set_value_cansleep(kim_data->nshutdown, 0);
+	usleep_range(150, 220);
+	gpio_set_value_cansleep(kim_data->nshutdown, 1);
+	usleep_range(150, 220);
+	gpio_set_value_cansleep(kim_data->nshutdown, 0);
+	usleep_range(150, 220);
+	gpio_set_value_cansleep(kim_data->nshutdown, 1);
+	usleep_range(1, 2);
+	return 0;
+}
+
+int plat_kim_chip_disable(struct kim_data_s *kim_data)
+{
+	gpio_set_value_cansleep(kim_data->nshutdown, 0);
+	return 0;
+}
+
+static struct ti_st_plat_data wilink_pdata = {
+	.nshutdown_gpio = SILVERBULLET_TIWI_BT_EN,
+	.dev_name = "/dev/ttymxc1",
+	.flow_cntrl = 1,
+	.baud_rate = 3000000,
+	.suspend = plat_kim_suspend,
+	.resume = plat_kim_resume,
+	.chip_enable = plat_kim_chip_enable,
+	.chip_disable = plat_kim_chip_disable
 };
 
-static struct fixed_voltage_config silverbullet_wl1271_reg_config = {
-	.supply_name		= "WLAN_EN",
-	.microvolts		= 1800000,
-	.gpio			= SILVERBULLET_TIWI_WLAN_EN,
-	.startup_delay		= 70000, /* 70msec */
-	.enable_high		= 1,
-	.enabled_at_boot	= 0,
-	.init_data		= &silverbullet_wl1271_reg_initdata,
+static struct platform_device wl127x_bt_device = {
+	.name	= "kim",
+	.id	= -1,
+	.dev.platform_data = &wilink_pdata,
 };
 
-static struct platform_device silverbullet_wl1271_reg_device = {
-	.name	= "reg-fixed-voltage",
-	.id	= 0,
-	.dev	= {
-		.platform_data = &silverbullet_wl1271_reg_config,
-	},
+static struct platform_device btwilink_device = {
+	.name = "btwilink",
+	.id = -1,
 };
-
-static struct wl12xx_platform_data silverbullet_wl1271_data __initdata = {
-	.irq = gpio_to_irq(SILVERBULLET_TIWI_WLAN_IRQ),
-	.board_ref_clock = WL12XX_REFCLOCK_38,
-};
-
+#else
 static int silverbullet_bt_power_change(int status)
 {
 	/* gpio request already performed during umobo_som_pca953x_setup */
 	if (status) {
+		usleep_range(150, 220);
+		gpio_set_value_cansleep(SILVERBULLET_TIWI_BT_EN, 0);
+		usleep_range(150, 220);
 		gpio_set_value_cansleep(SILVERBULLET_TIWI_BT_EN, 1);
-		mdelay(15);
+		usleep_range(150, 220);
+		gpio_set_value_cansleep(SILVERBULLET_TIWI_BT_EN, 0);
+		usleep_range(150, 220);
+		gpio_set_value_cansleep(SILVERBULLET_TIWI_BT_EN, 1);
+		usleep_range(1, 2);
 	} else {
 		gpio_set_value_cansleep(SILVERBULLET_TIWI_BT_EN, 0);
-		udelay(100);
 	}
 	return 0;
 }
@@ -1065,6 +1096,12 @@ static struct platform_device mxc_bt_rfkill = {
 
 static struct imx_bt_rfkill_platform_data mxc_bt_rfkill_data = {
 	.power_change = silverbullet_bt_power_change,
+};
+#endif /* CONFIG_TI_ST */
+
+static struct wl12xx_platform_data silverbullet_wl1271_data __initdata = {
+	.irq = gpio_to_irq(SILVERBULLET_TIWI_WLAN_IRQ),
+	.board_ref_clock = WL12XX_REFCLOCK_38,
 };
 #endif /* CONFIG_WL12XX_PLATFORM_DATA */
 
@@ -1088,15 +1125,18 @@ static int __init silverbullet_gpio_init(void) {
 	gpio_direction_output(SILVERBULLET_TIWI_WLAN_EN, 0);
 	gpio_direction_output(SILVERBULLET_TIWI_BT_EN, 0);
 	gpio_direction_output(SILVERBULLET_TIWI_FM_EN, 0);
-	gpio_free(SILVERBULLET_TIWI_WLAN_EN);
-	platform_device_register(&silverbullet_wl1271_reg_device);
 
 	/* WL12xx WLAN Init */
 	if (wl12xx_set_platform_data(&silverbullet_wl1271_data))
 		pr_err("error setting wl12xx data\n");
 
 	/* provide BT */
+#ifdef CONFIG_TI_ST
+	platform_device_register(&wl127x_bt_device);
+	platform_device_register(&btwilink_device);
+#else
 	mxc_register_device(&mxc_bt_rfkill, &mxc_bt_rfkill_data);
+#endif /* CONFIG_TI_ST */
 #endif /* CONFIG_WL12XX_PLATFORM_DATA */
 
 	return 0;
@@ -1354,7 +1394,6 @@ static void __init silverbullet_board_init(void)
 
 	imx6q_add_anatop_thermal_imx(1, &mx6q_silverbullet_anatop_thermal_data);
 
-	//ksz9031rn_phy_reset();
 	imx6_init_fec(fec_data);
 
 	imx6q_add_pm_imx(0, &mx6q_silverbullet_pm_data);
@@ -1380,7 +1419,7 @@ static void __init silverbullet_board_init(void)
 	}
 	imx6q_add_vpu();
 	imx6q_init_audio();
-	platform_device_register(&silverbullet_sd4_vmmc_reg_devices);
+	platform_device_register(&silverbullet_vmmc_reg_devices);
 
 	imx_asrc_data.asrc_core_clk = clk_get(NULL, "asrc_clk");
 	imx_asrc_data.asrc_audio_clk = clk_get(NULL, "asrc_serial_clk");
