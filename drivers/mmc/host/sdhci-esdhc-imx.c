@@ -760,6 +760,13 @@ static void plt_clk_ctrl(struct sdhci_host *host, bool enable)
 	}
 }
 
+static void plt_set_power(struct sdhci_host *host, int state)
+{
+	struct esdhc_platform_data *boarddata = host->mmc->parent->platform_data;
+	if (boarddata && boarddata->set_power)
+		boarddata->set_power(state);
+}
+ 
 static struct sdhci_ops sdhci_esdhc_ops = {
 	.read_l = esdhc_readl_le,
 	.read_w = esdhc_readw_le,
@@ -772,6 +779,7 @@ static struct sdhci_ops sdhci_esdhc_ops = {
 	.get_min_clock = esdhc_pltfm_get_min_clock,
 	.platform_8bit_width = plt_8bit_width,
 	.platform_clk_ctrl = plt_clk_ctrl,
+	.platform_set_power = plt_set_power,
 };
 
 static irqreturn_t cd_irq(int irq, void *data)
