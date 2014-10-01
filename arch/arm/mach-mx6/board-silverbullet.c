@@ -1132,6 +1132,7 @@ static int __init silverbullet_gpio_init(void) {
 
 	/* provide BT */
 #ifdef CONFIG_TI_ST
+	gpio_free(SILVERBULLET_TIWI_BT_EN);
 	platform_device_register(&wl127x_bt_device);
 	platform_device_register(&btwilink_device);
 #else
