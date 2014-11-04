@@ -19,6 +19,7 @@
 #include <linux/of_device.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
+#include <linux/regulator/consumer.h>
 
 #include "mxc_dispdrv.h"
 
@@ -31,6 +32,7 @@ struct mxc_lcd_platform_data {
 struct mxc_lcdif_data {
 	struct platform_device *pdev;
 	struct mxc_dispdrv_handle *disp_lcdif;
+	struct regulator *lcd_pwren;
 };
 
 #define DISPDRV_LCD	"lcd"
@@ -45,6 +47,12 @@ static struct fb_videomode lcdif_modedb[] = {
 	{
 	/* 800x480 @ 60 Hz , pixel clk @ 32MHz */
 	"SEIKO-WVGA", 60, 800, 480, 29850, 89, 164, 23, 10, 10, 10,
+	FB_SYNC_CLK_LAT_FALL,
+	FB_VMODE_NONINTERLACED,
+	0,},
+	{
+	/* 800x480 @ 60 Hz , pixel clk @ 24.5MHz */
+	"SAMSUNG-LMS700", 60, 800, 480, 40816, 16, 8, 4, 9, 8, 4,
 	FB_SYNC_CLK_LAT_FALL,
 	FB_VMODE_NONINTERLACED,
 	0,},
@@ -188,6 +196,16 @@ static int mxc_lcdif_probe(struct platform_device *pdev)
 	lcdif->disp_lcdif = mxc_dispdrv_register(&lcdif_drv);
 	mxc_dispdrv_setdata(lcdif->disp_lcdif, lcdif);
 
+	lcdif->lcd_pwren = devm_regulator_get(&pdev->dev, "lcd-pwren");
+	if (!IS_ERR(lcdif->lcd_pwren)) {
+		ret = regulator_enable(lcdif->lcd_pwren);
+		if (ret) {
+			dev_err(&pdev->dev, "error %d enabling lcd-pwren\n", ret);
+		}
+	} else {
+		lcdif->lcd_pwren = NULL;
+	}
+
 	dev_set_drvdata(&pdev->dev, lcdif);
 	dev_dbg(&pdev->dev, "%s exit\n", __func__);
 
@@ -197,6 +215,9 @@ static int mxc_lcdif_probe(struct platform_device *pdev)
 static int mxc_lcdif_remove(struct platform_device *pdev)
 {
 	struct mxc_lcdif_data *lcdif = dev_get_drvdata(&pdev->dev);
+
+	if (lcdif->lcd_pwren)
+		regulator_disable(lcdif->lcd_pwren);
 
 	mxc_dispdrv_puthandle(lcdif->disp_lcdif);
 	mxc_dispdrv_unregister(lcdif->disp_lcdif);
