@@ -919,14 +919,16 @@ static int isl29023_probe(struct i2c_client *client,
 	if (err)
 		goto exit_free_input;
 
-	/* set irq type to edge falling */
-	irq_set_irq_type(client->irq, IRQF_TRIGGER_FALLING);
-	err = request_irq(client->irq, isl29023_irq_handler, 0,
-			  client->dev.driver->name, data);
-	if (err < 0) {
-		dev_err(&client->dev, "failed to register irq %d!\n",
-			client->irq);
-		goto exit_free_input;
+	if (client->irq) {
+		/* set irq type to edge falling */
+		irq_set_irq_type(client->irq, IRQF_TRIGGER_FALLING);
+		err = request_irq(client->irq, isl29023_irq_handler, 0,
+				  client->dev.driver->name, data);
+		if (err < 0) {
+			dev_err(&client->dev, "failed to register irq %d!\n",
+				client->irq);
+			goto exit_free_input;
+		}
 	}
 
 	data->workqueue = create_singlethread_workqueue("isl29023");
@@ -955,7 +957,7 @@ static int isl29023_remove(struct i2c_client *client)
 
 	cancel_work_sync(&data->work);
 	destroy_workqueue(data->workqueue);
-	free_irq(client->irq, data);
+	if (client->irq) free_irq(client->irq, data);
 	input_unregister_device(data->input);
 	input_free_device(data->input);
 	sysfs_remove_group(&client->dev.kobj, &isl29023_attr_group);
