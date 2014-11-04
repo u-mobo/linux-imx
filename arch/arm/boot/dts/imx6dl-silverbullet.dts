@@ -1,0 +1,21 @@
+/*
+ * Copyright (C) 2013-2014 Freescale Semiconductor, Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+
+/dts-v1/;
+
+#include "imx6dl.dtsi"
+#include "silverbullet-common.dtsi"
+
+&pxp {
+	status = "okay";
+};
+
+/ {
+	model = "U-Mobo i.MX6 Silverbullet";
+	compatible = "umobo,imx6dl-silverbullet", "fsl,imx6dl";
+};
