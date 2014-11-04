@@ -526,5 +526,12 @@ config REGULATOR_AS3711
 	  This driver provides support for the voltage regulators on the
 	  AS3711 PMIC
 
+config REGULATOR_ID95APM
+	tristate "ID95APM voltage regulators"
+	depends on MFD_ID95APM
+	help
+	  This driver provides support for the voltage regulators of the
+	  IDT ID95APM PMIC.
+
 endif
 

@@ -139,6 +139,16 @@ config MFD_DA9055
 	  This driver can be built as a module. If built as a module it will be
 	  called "da9055"
 
+config MFD_ID95APM
+	bool "ID95APM PMIC support"
+	select MFD_CORE
+	depends on I2C=y
+	help
+	  The IDT ID95APM is an integrated audio and power management subsystem
+	  with watchdog and RTC functionality for embedded systems. This option
+	  enables core support for the ID95APM. Additional options must be
+	  selected to enable support for the functionality of the chip.
+
 config MFD_MXC_HDMI
 	tristate "Freescale HDMI Core"
 	select MFD_CORE

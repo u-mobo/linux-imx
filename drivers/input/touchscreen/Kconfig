@@ -11,6 +11,16 @@ menuconfig INPUT_TOUCHSCREEN
 
 if INPUT_TOUCHSCREEN
 
+config TOUCHSCREEN_ID95APM
+	tristate "ID95APM touchscreen support"
+	depends on MFD_ID95APM
+	help
+	  Say Y here to enable support for Touch Screen Controller provided
+	  by the IDT ID95APM PMIC. It disable ID95APM hwmon driver.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called id95apm_ts.
+
 config TOUCHSCREEN_88PM860X
 	tristate "Marvell 88PM860x touchscreen"
 	depends on MFD_88PM860X

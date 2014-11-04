@@ -641,4 +641,11 @@ config KEYBOARD_CROS_EC
 	  To compile this driver as a module, choose M here: the
 	  module will be called cros_ec_keyb.
 
+config KEYBOARD_ID95APM
+	tristate "ID95APM Power Switch Detector support"
+	depends on MFD_ID95APM
+	help
+	  Say Y here to enable support for Power Switch Detector
+	  provided by the IDT ID95APM PMIC
+
 endif

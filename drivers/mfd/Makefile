@@ -104,6 +104,8 @@ obj-$(CONFIG_MFD_LP8788)	+= lp8788.o lp8788-irq.o
 da9055-objs			:= da9055-core.o da9055-i2c.o
 obj-$(CONFIG_MFD_DA9055)	+= da9055.o
 
+obj-$(CONFIG_MFD_ID95APM)	+= id95apm.o
+
 obj-$(CONFIG_MFD_MAX17135)	+= max17135-core.o
 obj-$(CONFIG_MFD_MAX77686)	+= max77686.o max77686-irq.o
 obj-$(CONFIG_MFD_MAX77693)	+= max77693.o max77693-irq.o

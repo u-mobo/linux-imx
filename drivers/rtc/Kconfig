@@ -133,6 +133,16 @@ comment "I2C RTC drivers"
 
 if I2C
 
+config RTC_DRV_ID95APM
+	tristate "ID95APM RTC"
+	depends on MFD_ID95APM
+	help
+	  If you say yes here you will get support for the RTC subsystem
+	  of the IDT ID95APM.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called "rtc-id95apm".
+
 config RTC_DRV_88PM860X
 	tristate "Marvell 88PM860x"
 	depends on I2C && MFD_88PM860X

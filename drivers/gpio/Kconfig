@@ -319,6 +319,13 @@ config GPIO_GRGPIO
 
 comment "I2C GPIO expanders:"
 
+config GPIO_ID95APM
+	tristate "ID95APM GPIOs"
+	depends on MFD_ID95APM
+	help
+	  Say yes here to access the GPIO signals of ID95APM power management
+	  chips from IDT.
+
 config GPIO_ARIZONA
 	tristate "Wolfson Microelectronics Arizona class devices"
 	depends on MFD_ARIZONA

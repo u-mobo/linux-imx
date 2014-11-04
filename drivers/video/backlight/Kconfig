@@ -425,6 +425,13 @@ config BACKLIGHT_AS3711
 	  If you have an Austrian Microsystems AS3711 say Y to enable the
 	  backlight driver.
 
+config BACKLIGHT_ID95APM
+	tristate "ID95APM Backlight Driver"
+	depends on BACKLIGHT_CLASS_DEVICE && MFD_ID95APM
+	help
+	  If you have a backlight driven by the ISINK and DCDC of a
+	  ID95APM PMIC say y to enable the backlight driver for it.
+
 endif # BACKLIGHT_CLASS_DEVICE
 
 endif # BACKLIGHT_LCD_SUPPORT
