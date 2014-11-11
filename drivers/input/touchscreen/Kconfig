@@ -11,6 +11,15 @@ menuconfig INPUT_TOUCHSCREEN
 
 if INPUT_TOUCHSCREEN
 
+config TOUCHSCREEN_CLICKTOUCH
+	tristate "Clicktouch touchscreen support"
+	depends on I2C
+	help
+	  Say Y here to enable support for Clicktouch Touch Screen Controller.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called clicktouch_ts.
+
 config TOUCHSCREEN_ID95APM
 	tristate "ID95APM touchscreen support"
 	depends on MFD_ID95APM

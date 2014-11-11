@@ -419,7 +419,7 @@
 	};
 
 	clicktouch_ts@1f {
-		compatible = "clt,tma300";
+		compatible = "clicktouch_ts";
 		reg = <0x1f>;
 	};
 
