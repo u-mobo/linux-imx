@@ -53,6 +53,17 @@
 #define KS8737_CTRL_INT_ACTIVE_HIGH		(1 << 14)
 #define KSZ8051_RMII_50MHZ_CLK			(1 << 7)
 
+static int gigabit_enabled __initdata = 0;
+
+static int __init gigabit_setup(char *gigabit)
+{
+	if(gigabit != 0 && strcmp(gigabit, "1") == 0)
+		gigabit_enabled = 1;
+
+	return 1;
+}
+__setup("gigabit=", gigabit_setup);
+
 static int ksz_config_flags(struct phy_device *phydev)
 {
 	int regval;
@@ -324,6 +335,21 @@ static struct phy_driver ksphy_driver[] = {
 
 static int __init ksphy_init(void)
 {
+	// Tweak KSZ9031
+	int i = 0;
+	for(i = 0; i < ARRAY_SIZE(ksphy_driver); i++)
+	{
+		if(ksphy_driver[i].phy_id == PHY_ID_KSZ9031)
+		{
+			if(gigabit_enabled)
+				ksphy_driver[i].features = (PHY_GBIT_FEATURES | SUPPORTED_Pause | SUPPORTED_Asym_Pause);
+			else
+				ksphy_driver[i].features = (PHY_BASIC_FEATURES | SUPPORTED_Pause | SUPPORTED_Asym_Pause);
+
+			break;
+		}
+	}
+
 	return phy_drivers_register(ksphy_driver,
 		ARRAY_SIZE(ksphy_driver));
 }
